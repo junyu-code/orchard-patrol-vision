@@ -1,0 +1,161 @@
+"""应用配置中心。
+
+这里保存可以提交到代码仓库的运行参数。平台登录账号密码不要写进代码，
+本地凭据请放在 `config/platform_accounts.local.json`，该文件已加入 .gitignore。
+"""
+
+from copy import deepcopy
+
+
+# 平台入口备忘：
+# 甲方A平台：https://judaonongye.hhzzss.cn/index
+# 甲方A本地凭据：CLIENT_A_USERNAME / CLIENT_A_PASSWORD 或 config/platform_accounts.local.json
+# 甲方B平台：https://www.xsjny.com/web/robot-analysis-ui/index.html
+# 甲方B本地凭据：CLIENT_B_USERNAME / CLIENT_B_PASSWORD 或 config/platform_accounts.local.json
+
+# 预设配置方案：方便在不同甲方之间切换
+PRESET_CONFIGS = {
+    # 甲方A：原有的 HTTP + RTMP 系统
+    "client_a": {
+        "ENABLE_HTTP": True,
+        "HTTP_URL": "https://api.jdpm.hhzzss.cn/agriculture/position/robotPost",
+        "ENABLE_RTMP": True,
+        "RTMP_URL": "rtmp://sip.jdny.hhzzss.cn:21935/116/D13Z94P4P30H?sign=41db35390ddad33f83944f44b8b75ded",
+        "ENABLE_UDP": False,
+        "UDP_HOST": "",
+        "UDP_PORT": 0,
+        "RAW_STREAM_ONLY": False,
+        "SIMULATE_TREE_EVENTS": False,
+        "ENABLE_PATROL_TIMELINE": False,
+    },
+
+    # 甲方B：新的统一平台，使用 UDP + RTMP
+    "client_b": {
+        "ENABLE_HTTP": False,
+        "HTTP_URL": "",
+        "ENABLE_RTMP": True,
+        "RTMP_URL": "rtmp://www.xsjny.com/live/robot1_sensor1",
+        "ENABLE_UDP": True,
+        "UDP_HOST": "1.15.149.164",
+        "UDP_PORT": 4926,
+        "UDP_ORCHARD_ID": "orchard1",
+        "UDP_ADD_ORCHARD_PREFIX": True,
+        "RAW_STREAM_ONLY": True,
+        "SIMULATE_TREE_EVENTS": False,
+        "ENABLE_PATROL_TIMELINE": True,
+        "PATROL_SOURCE_NAME": "test0_push.mp4",
+        "PATROL_TREE_TIMES": [1, 5, 9, 13, 17, 22, 27, 31, 35, 39],
+        "PATROL_START_TREE_ID": 1,
+        "PATROL_TIMELINE_DEBUG": False,
+        "UDP_TREE_EVENT_DEBUG": False,
+        "PINGPONG_SOURCE": True,
+        "RTMP_MAX_WIDTH": 480,
+        "RTMP_MAX_FPS": 10,
+        "RTMP_VIDEO_BITRATE": "400k",
+        "RTMP_MAXRATE": "550k",
+        "RTMP_BUFSIZE": "800k",
+        "RAW_FRAME_TARGET_FPS": 10,
+        "PLAYBACK_RATE_FPS": 10,
+        "UDP_VERBOSE_LOG": True,
+        "UDP_LOG_INTERVAL": 5,
+        "USE_SYSTEM_LOCATION": False,
+        "SIM_BASE_LAT": 25.28,
+        "SIM_BASE_LON": 110.34,
+    },
+
+    # 同时对接两家，主要用于联调测试
+    "both": {
+        "ENABLE_HTTP": True,
+        "HTTP_URL": "https://api.jdpm.hhzzss.cn/agriculture/position/robotPost",
+        "ENABLE_RTMP": True,
+        "RTMP_URL": "rtmp://www.xsjny.com/live/robot1_sensor1",
+        "ENABLE_UDP": True,
+        "UDP_HOST": "1.15.149.164",
+        "UDP_PORT": 4926,
+        "UDP_ORCHARD_ID": "orchard1",
+        "UDP_ADD_ORCHARD_PREFIX": True,
+        "RAW_STREAM_ONLY": True,
+        "SIMULATE_TREE_EVENTS": False,
+        "ENABLE_PATROL_TIMELINE": True,
+        "PATROL_SOURCE_NAME": "test0_push.mp4",
+        "PATROL_TREE_TIMES": [1, 5, 9, 13, 17, 22, 27, 31, 35, 39],
+        "PATROL_START_TREE_ID": 1,
+        "PATROL_TIMELINE_DEBUG": False,
+        "UDP_TREE_EVENT_DEBUG": False,
+        "PINGPONG_SOURCE": True,
+        "RTMP_MAX_WIDTH": 480,
+        "RTMP_MAX_FPS": 10,
+        "RTMP_VIDEO_BITRATE": "400k",
+        "RTMP_MAXRATE": "550k",
+        "RTMP_BUFSIZE": "800k",
+        "RAW_FRAME_TARGET_FPS": 10,
+        "PLAYBACK_RATE_FPS": 10,
+        "UDP_VERBOSE_LOG": True,
+        "UDP_LOG_INTERVAL": 5,
+        "USE_SYSTEM_LOCATION": False,
+        "SIM_BASE_LAT": 25.28,
+        "SIM_BASE_LON": 110.34,
+    },
+}
+
+# 在这里选择默认配置：'client_a' | 'client_b' | 'both'
+ACTIVE_PRESET = "client_b"
+PRESET_NAMES = tuple(PRESET_CONFIGS.keys())
+
+BASE_CONFIG = {
+    "PRESET_NAME": ACTIVE_PRESET,
+
+    # 串口配置
+    "ENABLE_SERIAL": False,
+    "SERIAL_PORT": "COM13",
+    "BAUDRATE": 9600,
+
+    # YOLO 模型配置
+    "WEIGHTS": "./pt/best.pt",
+    "SOURCE": "0",
+    "CONF_THRES": 0.8,
+    "IOU_THRES": 0.45,
+    "IMG_SIZE": 640,
+    "RAW_STREAM_ONLY": False,
+    "LOOP_SOURCE": True,
+
+    # RTMP 推流配置
+    "RTMP_MAX_WIDTH": 1280,
+    "RTMP_MAX_FPS": 25,
+    "RTMP_VIDEO_BITRATE": "1200k",
+    "RTMP_MAXRATE": "1500k",
+    "RTMP_BUFSIZE": "2400k",
+    "RAW_FRAME_TARGET_FPS": 0,
+    "PLAYBACK_RATE_FPS": 0,
+
+    # 机器人标识，用于甲方B UDP 协议
+    "ROBOT_ID": 1,
+    "SENSOR_ID": 1,
+    "UDP_ORCHARD_ID": "orchard1",
+    "UDP_ADD_ORCHARD_PREFIX": False,
+    "SIMULATE_TREE_EVENTS": False,
+    "TREE_INTERVAL": 8,
+    "TREE_JITTER": 2,
+    "TREE_HOLD_FRAMES": 5,
+    "UDP_VERBOSE_LOG": False,
+    "UDP_LOG_INTERVAL": 5,
+    "USE_SYSTEM_LOCATION": False,
+    "SIM_BASE_LAT": 25.28,
+    "SIM_BASE_LON": 110.34,
+    "ENABLE_PATROL_TIMELINE": False,
+    "PATROL_SOURCE_NAME": "test0_push.mp4",
+    "PATROL_TREE_TIMES": [],
+    "PATROL_START_TREE_ID": 1,
+    "PATROL_TIMELINE_DEBUG": False,
+    "UDP_TREE_EVENT_DEBUG": False,
+    "PINGPONG_SOURCE": False,
+}
+
+
+def build_config(preset_name=None):
+    """构建运行配置，避免外部直接修改全局模板。"""
+    active_preset = preset_name or ACTIVE_PRESET
+    config = deepcopy(BASE_CONFIG)
+    config.update(PRESET_CONFIGS.get(active_preset, PRESET_CONFIGS["client_a"]))
+    config["PRESET_NAME"] = active_preset
+    return config
