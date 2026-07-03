@@ -1,0 +1,17 @@
+{
+  "platform": {
+    "description": "对接说明中的平台地址",
+    "udp_host": "1.15.149.164",
+    "udp_port": 4926,
+    "rtmp_host": "www.xsjny.com",
+    "rtmp_url_pattern": "rtmp://{rtmp_host}/live/{robot_name}_{sensor_name}"
+  },
+  "legacy": {
+    "description": "合并前 push 业务旧地址备份",
+    "udp_host": "43.139.69.203",
+    "udp_port": 10088,
+    "rtmp_host": "43.139.69.203",
+    "rtmp_port": 1936,
+    "rtmp_url_pattern": "rtmp://{rtmp_host}:{rtmp_port}/live/{orchard_id}_{robot_name}_{sensor_name}"
+  }
+}

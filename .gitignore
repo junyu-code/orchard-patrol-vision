@@ -1,0 +1,73 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# PyQt
+*.ui.autosave
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Model weights (large files)
+*.pt
+*.pth
+*.weights
+!yolov5s.pt
+
+# Video assets (large local media files)
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.flv
+*.wmv
+
+# Results and outputs
+runs/
+result/
+output/
+
+# Data
+datasets/
+data/images/*.jpg
+data/images/*.png
+!data/images/bus.jpg
+!data/images/zidane.jpg
+
+# Logs
+*.log
+wandb/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+
+# Config overrides
+config/ip.json
+config/*.local.json
+
+# Documents
+*.docx
+*.doc
+*.pdf

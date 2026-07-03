@@ -1,0 +1,12 @@
+{
+  "client_a": {
+    "platform_url": "https://judaonongye.hhzzss.cn/index",
+    "username": "CLIENT_A_USERNAME",
+    "password": "CLIENT_A_PASSWORD"
+  },
+  "client_b": {
+    "platform_url": "https://www.xsjny.com/web/robot-analysis-ui/index.html",
+    "username": "CLIENT_B_USERNAME",
+    "password": "CLIENT_B_PASSWORD"
+  }
+}
