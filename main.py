@@ -21,8 +21,12 @@ from config.app_config import ACTIVE_PRESET, PRESET_NAMES, build_config
 
 CONFIG = build_config()
 
-from PyQt5.QtWidgets import QApplication, QMainWindow, QFileDialog, QMenu, QAction, QListWidgetItem, QLabel, QVBoxLayout, QWidget, QSizePolicy, QStyleFactory
-from PyQt5.QtCore import Qt, QPoint, QTimer, QThread, pyqtSignal
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QFileDialog, QMenu, QAction, QListWidgetItem,
+    QLabel, QVBoxLayout, QWidget, QSizePolicy, QStyleFactory, QGridLayout,
+    QFrame, QHBoxLayout, QPushButton,
+)
+from PyQt5.QtCore import Qt, QPoint, QTimer, QThread, pyqtSignal, QCoreApplication
 from PyQt5.QtGui import QImage, QPixmap, QIcon, QFont
 
 from main_win.win import Ui_mainWindow
@@ -70,6 +74,17 @@ try:
 except ImportError as e:
     print(f"⚠️ VirtualSensorSimulator 模块未找到: {e}")
     VirtualSensorSimulator = None
+
+try:
+    from transport.gps_protocol import GpsSnapshot, select_frame_gps_dms
+    from transport.gps_serial_receiver import GpsSerialReceiver
+    from transport.gps_event_logger import GpsEventLogger
+except ImportError as e:
+    print(f"⚠️ GPS 串口模块未找到: {e}")
+    GpsSnapshot = None
+    select_frame_gps_dms = None
+    GpsSerialReceiver = None
+    GpsEventLogger = None
 
 warnings.filterwarnings('ignore')
 
@@ -228,6 +243,7 @@ class DetThread(QThread):
     send_img = pyqtSignal(np.ndarray)
     send_raw = pyqtSignal(np.ndarray)
     send_statistic = pyqtSignal(dict)
+    send_data = pyqtSignal(dict)
     send_msg = pyqtSignal(str)
     send_percent = pyqtSignal(int)
     send_fps = pyqtSignal(str)
@@ -256,6 +272,10 @@ class DetThread(QThread):
         self.http_sender = None
         self.rtmp_sender = None
         self.udp_sender = None
+        self.gps_receiver = None
+        self.gps_event_logger = None
+        self.dataset = None
+        self.vid_cap = None
         if VirtualSensorSimulator:
             self.sensor_sim = VirtualSensorSimulator(
                 lat_decimal=self.cfg.get("SIM_BASE_LAT"),
@@ -286,6 +306,45 @@ class DetThread(QThread):
             except Exception as e:
                 print(f"❌ 串口打开失败: {e.__class__.__name__}: {e}")
                 self.serial_sender = None
+
+        # GPS 接收使用独立串口，禁止与病害串口发送器抢占同一端口
+        if self.cfg.get("ENABLE_GPS_SERIAL"):
+            gps_port = str(self.cfg.get("GPS_SERIAL_PORT", "")).strip()
+            disease_port = str(self.cfg.get("SERIAL_PORT", "")).strip()
+            auto_detect = bool(self.cfg.get("GPS_SERIAL_AUTO_DETECT", True))
+            ports_conflict = (
+                self.cfg.get("ENABLE_SERIAL")
+                and gps_port
+                and disease_port
+                and gps_port.lower() == disease_port.lower()
+            )
+            if ports_conflict:
+                print(f"❌ GPS 串口与病害发送串口冲突: {gps_port}")
+            elif not gps_port and not auto_detect:
+                print("❌ GPS 串口未配置，无法启动接收器")
+            elif GpsSerialReceiver is None:
+                print("❌ GPS 串口模块未加载，请确认已经安装 pyserial")
+            else:
+                try:
+                    self.gps_receiver = GpsSerialReceiver(
+                        port=gps_port,
+                        baudrate=self.cfg.get("GPS_SERIAL_BAUDRATE", 9600),
+                        read_timeout=self.cfg.get("GPS_SERIAL_READ_TIMEOUT", 0.2),
+                        stale_timeout=self.cfg.get("GPS_STALE_TIMEOUT", 1.0),
+                        reconnect_interval=self.cfg.get("GPS_RECONNECT_INTERVAL", 2.0),
+                        max_buffer_bytes=self.cfg.get("GPS_MAX_BUFFER_BYTES", 4096),
+                        auto_detect=auto_detect,
+                        probe_timeout=self.cfg.get("GPS_SERIAL_PROBE_TIMEOUT", 1.5),
+                        excluded_ports=[disease_port] if self.cfg.get("ENABLE_SERIAL") else [],
+                    )
+                    if GpsEventLogger is not None:
+                        self.gps_event_logger = GpsEventLogger(
+                            log_dir=self.cfg.get("GPS_EVENT_LOG_DIR", "./result/gps_events"),
+                            retention_days=self.cfg.get("GPS_EVENT_LOG_RETENTION_DAYS", 3),
+                        )
+                except Exception as e:
+                    print(f"❌ GPS 串口接收器初始化失败: {e}")
+                    self.gps_receiver = None
 
         # 2. 初始化 HTTP
         if self.cfg["ENABLE_HTTP"] and HttpSender is not None:
@@ -371,6 +430,45 @@ class DetThread(QThread):
             print(f"   调试秒点: {event_times}")
         return timeline
 
+    def _start_gps_receiver(self):
+        """按需启动 GPS 接收线程，支持检测线程重复运行。"""
+        if self.gps_receiver and not self.gps_receiver.is_running:
+            self.gps_receiver.start()
+
+    def _get_frame_gps_snapshot(self):
+        """每个处理帧只调用一次，确保所有下游使用同一份位置。"""
+        if self.cfg.get("ENABLE_GPS_SERIAL"):
+            if self.gps_receiver:
+                return self.gps_receiver.get_snapshot()
+            return GpsSnapshot.empty() if GpsSnapshot is not None else None
+        return None
+
+    def _log_gps_event(
+        self,
+        event_type,
+        channel,
+        frame_index,
+        source_time_s,
+        gps_snapshot,
+        diseases=None,
+        tree_event=None,
+    ):
+        """记录业务事件；日志故障不能影响检测和平台上报。"""
+        if not self.gps_event_logger or gps_snapshot is None:
+            return
+        try:
+            self.gps_event_logger.log_event(
+                event_type=event_type,
+                channel=channel,
+                frame_index=frame_index,
+                source_time_s=source_time_s,
+                gps_snapshot=gps_snapshot,
+                diseases=diseases,
+                tree_event=tree_event,
+            )
+        except Exception as e:
+            print(f"⚠️ GPS 事件日志写入失败: {e}")
+
     def _should_pingpong_source(self):
         """仅对本地演示视频启用正放/倒放循环。"""
         if not self.cfg.get("PINGPONG_SOURCE", False):
@@ -382,6 +480,16 @@ class DetThread(QThread):
         return not expected_name or Path(source).name.lower() == expected_name
 
     def cleanup_resources(self):
+        dataset = getattr(self, "dataset", None)
+        if dataset is not None and getattr(dataset, "cap", None) is not None:
+            try: dataset.cap.release()
+            except: pass
+        if getattr(self, "vid_cap", None) is not None:
+            try: self.vid_cap.release()
+            except: pass
+        if self.gps_receiver:
+            try: self.gps_receiver.stop()
+            except: pass
         if self.serial_sender:
             try: self.serial_sender.close_serial()
             except: pass
@@ -412,10 +520,16 @@ class DetThread(QThread):
         if not raw_stream_only:
             print(f"   模型: {self.weights}")
         print(f"   源: {self.source}")
-        print(f"   HTTP: {'✅' if self.http_sender else '❌'} | RTMP: {'✅' if self.rtmp_sender else '❌'} | UDP: {'✅' if self.udp_sender else '❌'}")
+        print(
+            f"   HTTP: {'✅' if self.http_sender else '❌'} | "
+            f"RTMP: {'✅' if self.rtmp_sender else '❌'} | "
+            f"UDP: {'✅' if self.udp_sender else '❌'} | "
+            f"GPS: {'✅' if self.gps_receiver else '❌'}"
+        )
         print("="*50)
         
         try:
+            self._start_gps_receiver()
             stride = 32
             model = None
             names = ["溃疡病", "黄龙病", "炭疽病"]
@@ -470,6 +584,7 @@ class DetThread(QThread):
 
             count = 0
             start_time = time.time()
+            self.dataset = dataset
             dataset = iter(dataset)
             rtmp_initialized = False
 
@@ -518,6 +633,10 @@ class DetThread(QThread):
                 statistic_dic = {n: 0 for n in names}
                 max_conf_dic = {n: 0.0 for n in names}
                 im0 = im0s.copy()
+                render_detection_overlay = (
+                    not self.cfg.get("HEADLESS", False)
+                    or bool(self.cfg.get("ENABLE_HTTP") and self.http_sender)
+                )
 
                 if not raw_stream_only:
                     img = torch.from_numpy(img).to(device)
@@ -540,42 +659,100 @@ class DetThread(QThread):
                                 if current_conf > max_conf_dic[class_name]:
                                     max_conf_dic[class_name] = current_conf
                                 label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
-                                im0 = plot_one_box_chinese(xyxy, im0, label=label, color=colors(c, True), line_thickness=line_thickness)
+                                if render_detection_overlay:
+                                    im0 = plot_one_box_chinese(xyxy, im0, label=label, color=colors(c, True), line_thickness=line_thickness)
+
+                count_canker = statistic_dic.get("溃疡病", 0)
+                count_huanglong = statistic_dic.get("黄龙病", 0)
+                count_anthrac = statistic_dic.get("炭疽病", 0)
+                conf_canker = max_conf_dic.get("溃疡病", 0.0)
+                conf_huanglong = max_conf_dic.get("黄龙病", 0.0)
+                conf_anthrac = max_conf_dic.get("炭疽病", 0.0)
+                disease_count = count_canker + count_huanglong + count_anthrac
+                disease_detected = disease_count > 0
+
+                source_time_s = getattr(dataset, "current_source_time", None)
+                tree_event = None
+                if self.patrol_timeline:
+                    tree_event = self.patrol_timeline.consume_event(
+                        playback_time=source_time_s,
+                        playback_direction=getattr(dataset, "playback_direction", 1),
+                        traversal_index=getattr(dataset, "traversal_index", 0),
+                    )
+
+                # 传感器状态和 GPS 每帧只取一次，保证所有上报通道数据一致
+                if self.sensor_sim:
+                    self.sensor_sim.update(
+                        count,
+                        is_near_tree=disease_detected or bool(tree_event),
+                    )
+                    status_data = self.sensor_sim.get_status_data()
+                else:
+                    status_data = {
+                        "velocity": 0.0,
+                        "azimuth": 0,
+                        "bat_voltage": 24.0,
+                        "soc": 85,
+                        "route_index": 1,
+                        "waypoint_index": 0,
+                        "eyepoint_height": 1.5,
+                    }
+
+                frame_gps_snapshot = self._get_frame_gps_snapshot()
+                fallback_gps_dms = (
+                    self.sensor_sim.get_gps_dms()
+                    if self.sensor_sim
+                    else (39, 54, 20, "N", 116, 23, 29, "E")
+                )
+                if select_frame_gps_dms is not None:
+                    gps_dms = select_frame_gps_dms(
+                        gps_enabled=self.cfg.get("ENABLE_GPS_SERIAL", False),
+                        gps_snapshot=frame_gps_snapshot,
+                        fallback_dms=fallback_gps_dms,
+                    )
+                else:
+                    gps_dms = fallback_gps_dms
+
+                lat_d, lat_m, lat_s, lat_dir, lon_d, lon_m, lon_s, lon_dir = gps_dms
+                diseases_for_log = {
+                    "溃疡病": {"count": count_canker, "confidence": conf_canker},
+                    "黄龙病": {"count": count_huanglong, "confidence": conf_huanglong},
+                    "炭疽病": {"count": count_anthrac, "confidence": conf_anthrac},
+                }
+                current_time = time.time()
+                gps_snapshot_data = (
+                    frame_gps_snapshot.to_dict()
+                    if frame_gps_snapshot is not None and hasattr(frame_gps_snapshot, "to_dict")
+                    else {}
+                )
+                self.send_data.emit({
+                    "frame_index": count,
+                    "source_time_s": source_time_s,
+                    "work_mode": "原始视频推流" if raw_stream_only else "YOLO识别",
+                    "disease_count": disease_count,
+                    "disease_detected": disease_detected,
+                    "diseases": diseases_for_log,
+                    "status": status_data,
+                    "gps_dms": gps_dms,
+                    "gps": gps_snapshot_data,
+                    "tree_event": tree_event,
+                    "udp_send_count": self.udp_send_count,
+                    "channels": {
+                        "HTTP": bool(self.http_sender),
+                        "RTMP": bool(self.rtmp_sender),
+                        "UDP": bool(self.udp_sender),
+                        "GPS": bool(self.gps_receiver),
+                    },
+                })
 
                 # HTTP 发送数据
                 if self.cfg["ENABLE_HTTP"] and self.http_sender:
                     try:
-                        count_canker = statistic_dic.get("溃疡病", 0)
-                        count_huanglong = statistic_dic.get("黄龙病", 0)
-                        count_anthrac = statistic_dic.get("炭疽病", 0)
-
-                        conf_canker = max_conf_dic.get("溃疡病", 0.0)
-                        conf_huanglong = max_conf_dic.get("黄龙病", 0.0)
-                        conf_anthrac = max_conf_dic.get("炭疽病", 0.0)
-
-                        is_detecting = (count_canker + count_huanglong + count_anthrac) > 0
-
-                        if self.sensor_sim:
-                            self.sensor_sim.update(count, is_near_tree=is_detecting)
-                            lat_d, lat_m, lat_s, lat_dir, lon_d, lon_m, lon_s, lon_dir = self.sensor_sim.get_gps_dms()
-                            status_data = self.sensor_sim.get_status_data()
-                        else:
-                            lat_d, lat_m, lat_s, lat_dir = 39, 54, 20, "N"
-                            lon_d, lon_m, lon_s, lon_dir = 116, 23, 29, "E"
-                            status_data = {"velocity":0, "azimuth":0, "bat_voltage":24, "soc":85, "route_index":1, "waypoint_index":0, "eyepoint_height":1.5}
-
-                        current_time = time.time()
-
-                        # 修改判断逻辑：
-                        # 1. 必须检测到病害 (is_detecting)
-                        # 2. 且距离上次发送超过指定间隔 (current_time - self.last_http_send_time > self.http_send_interval)
-                        # 3. 定期心跳500帧（即使没病害）
-                        should_send = (is_detecting or count % 500 == 0) and (current_time - self.last_http_send_time > self.http_send_interval)
-
+                        should_send = (
+                            (disease_detected or count % 500 == 0)
+                            and current_time - self.last_http_send_time > self.http_send_interval
+                        )
                         if should_send:
-                            frame_to_send = im0
-                            # frame_to_send = im0 if send_image_flag else None
-
                             self.http_sender.send_robot_with_disease(
                                 robot_id="ROBOT_001",
                                 robot_status=1,
@@ -593,61 +770,40 @@ class DetThread(QThread):
                                 conf1=conf_canker, count1=count_canker,
                                 conf2=conf_huanglong, count2=count_huanglong,
                                 conf3=conf_anthrac, count3=count_anthrac,
-                                image_frame=frame_to_send
+                                image_frame=im0,
                             )
-
-                            # 更新上次发送时间
                             self.last_http_send_time = current_time
-                            print(f"📤 HTTP 上报 | 帧:{count} | 病害:{count_canker+count_huanglong+count_anthrac}")
-                        else:
-                            # 可选：打印跳过日志，调试用，正式运行可注释掉
-                            # if is_detecting:
-                            #     print(f"⏭️ HTTP 跳过 (频率限制) | 帧:{count}")
-                            pass
+                            print(f"📤 HTTP 上报 | 帧:{count} | 病害:{disease_count}")
+                            if disease_detected:
+                                self._log_gps_event(
+                                    event_type="disease",
+                                    channel="http",
+                                    frame_index=count,
+                                    source_time_s=source_time_s,
+                                    gps_snapshot=frame_gps_snapshot,
+                                    diseases=diseases_for_log,
+                                )
                     except Exception as e:
                         print(f"❌ HTTP 发送失败 ({e.__class__.__name__}): {str(e)}")
 
-                # UDP 发送数据 (新增 - 用于甲方B)
+                # UDP 发送数据，用于甲方B平台
                 if self.cfg.get("ENABLE_UDP") and self.udp_sender:
-                    if count == 1:  # 第一帧时打印调试信息
-                        print(f"🔍 UDP 发送准备:")
+                    if count == 1:
+                        print("🔍 UDP 发送准备:")
                         print(f"   udp_sender 对象: {self.udp_sender}")
                         print(f"   发送间隔: {self.udp_send_interval}秒")
-                        print(f"   完整字段: 机器人状态/帧号/左右果树编号/时间/GPS/方位角/速度/相机高度/电压/电量")
+                        print("   完整字段: 机器人状态/帧号/左右果树编号/时间/GPS/方位角/速度/相机高度/电压/电量")
                     try:
-                        count_canker = statistic_dic.get("溃疡病", 0)
-                        count_huanglong = statistic_dic.get("黄龙病", 0)
-                        count_anthrac = statistic_dic.get("炭疽病", 0)
-                        # 纯推流模式没有识别结果，病害状态固定为 False，只保留UDP链路心跳。
-                        is_detecting = False if raw_stream_only else (count_canker + count_huanglong + count_anthrac) > 0
-                        tree_event = None
-                        if self.patrol_timeline:
-                            tree_event = self.patrol_timeline.consume_event(
-                                playback_time=getattr(dataset, "current_source_time", None),
-                                playback_direction=getattr(dataset, "playback_direction", 1),
-                                traversal_index=getattr(dataset, "traversal_index", 0),
-                            )
-                            if tree_event:
-                                is_detecting = False
+                        # 纯推流和固定果树事件不携带模型病害状态
+                        udp_disease_detected = False if raw_stream_only or tree_event else disease_detected
                         is_near_tree_event = bool(tree_event)
-
-                        # 获取传感器数据
-                        if self.sensor_sim:
-                            self.sensor_sim.update(count, is_near_tree=is_detecting or is_near_tree_event)
-                            lat_d, lat_m, lat_s, lat_dir, lon_d, lon_m, lon_s, lon_dir = self.sensor_sim.get_gps_dms()
-                            status_data = self.sensor_sim.get_status_data()
-                        else:
-                            lat_d, lat_m, lat_s, lat_dir = 39, 54, 20, "N"
-                            lon_d, lon_m, lon_s, lon_dir = 116, 23, 29, "E"
-                            status_data = {"velocity":0.0, "azimuth":0, "bat_voltage":24.0, "soc":85, "eyepoint_height":1.5}
-
-                        current_time = time.time()
                         velocity_protocol = int(round(float(status_data['velocity']) * 10))
                         eyepoint_height_protocol = int(round(float(status_data['eyepoint_height']) * 100))
                         bat_voltage_protocol = int(round(float(status_data['bat_voltage']) * 10))
-
-                        # UDP 发送策略：甲方B固定果树事件立即上报，其余时间每秒发送巡检心跳
-                        should_send_udp = bool(tree_event) or (current_time - self.last_udp_send_time > self.udp_send_interval)
+                        should_send_udp = (
+                            is_near_tree_event
+                            or current_time - self.last_udp_send_time > self.udp_send_interval
+                        )
 
                         if should_send_udp:
                             success = self.udp_sender.send_robot_data(
@@ -660,11 +816,29 @@ class DetThread(QThread):
                                 eyepoint_height=eyepoint_height_protocol,
                                 bat_voltage=bat_voltage_protocol,
                                 soc=status_data['soc'],
-                                disease_detected=is_detecting,
-                                tree_event=tree_event
+                                disease_detected=udp_disease_detected,
+                                tree_event=tree_event,
                             )
                             if success:
                                 self.udp_send_count += 1
+                                if tree_event:
+                                    self._log_gps_event(
+                                        event_type="tree",
+                                        channel="udp",
+                                        frame_index=count,
+                                        source_time_s=source_time_s,
+                                        gps_snapshot=frame_gps_snapshot,
+                                        tree_event=tree_event,
+                                    )
+                                elif udp_disease_detected:
+                                    self._log_gps_event(
+                                        event_type="disease",
+                                        channel="udp",
+                                        frame_index=count,
+                                        source_time_s=source_time_s,
+                                        gps_snapshot=frame_gps_snapshot,
+                                        diseases=diseases_for_log,
+                                    )
                             self.last_udp_send_time = current_time
                             if tree_event:
                                 if self.cfg.get("UDP_TREE_EVENT_DEBUG", False):
@@ -680,7 +854,7 @@ class DetThread(QThread):
                                 log_interval = max(1, int(self.cfg.get("UDP_LOG_INTERVAL", 5)))
                                 if self.udp_send_count == 1 or self.udp_send_count % log_interval == 0:
                                     print(f"📡 UDP 数据 | {self.udp_sender.get_last_packet_summary()}")
-                            if is_detecting:
+                            if udp_disease_detected:
                                 print(f"📡 UDP 上报 | 帧:{count} | 病害检测")
                     except Exception as e:
                         print(f"❌ UDP 发送失败 ({e.__class__.__name__}): {str(e)}")
@@ -697,8 +871,9 @@ class DetThread(QThread):
                 if self.rate_check:
                     time.sleep(1.0 / self.rate)
 
-                self.send_img.emit(im0)
-                self.send_raw.emit(im0s)
+                if not self.cfg.get("HEADLESS", False):
+                    self.send_img.emit(im0)
+                    self.send_raw.emit(im0s)
                 self.send_statistic.emit(statistic_dic)
 
         except Exception as e:
@@ -717,7 +892,10 @@ class MainWindow(QMainWindow, Ui_mainWindow):
         self.showMaximized()# 启动时默认最大化窗口（全屏效果） 
         self.cfg = config if config else CONFIG
         self.m_flag = False
+        self._closing = False
+        self.realtime_value_labels = {}
         self.setWindowFlags(Qt.CustomizeWindowHint | Qt.WindowStaysOnTopHint)
+        self.setup_compact_left_panel()
 
         self.minButton.clicked.connect(self.showMinimized)
         self.maxButton.clicked.connect(self.max_or_restore)
@@ -743,6 +921,7 @@ class MainWindow(QMainWindow, Ui_mainWindow):
         self.det_thread.send_raw.connect(lambda x: self.show_image(x, self.raw_video))
         self.det_thread.send_img.connect(lambda x: self.show_image(x, self.out_video))
         self.det_thread.send_statistic.connect(self.show_statistic)
+        self.det_thread.send_data.connect(self.show_realtime_data)
         self.det_thread.send_msg.connect(self.show_msg)
         self.det_thread.send_percent.connect(lambda x: self.progressBar.setValue(x))
         self.det_thread.send_fps.connect(lambda x: self.fps_label.setText(x))
@@ -757,9 +936,130 @@ class MainWindow(QMainWindow, Ui_mainWindow):
         self.runButton.clicked.connect(self.run_or_continue)
         self.stopButton.clicked.connect(self.stop)
         self.comboBox.currentTextChanged.connect(self.change_model)
+        self.horizontalModeButton.clicked.connect(lambda: self.set_detection_orientation(Qt.Horizontal))
+        self.verticalModeButton.clicked.connect(lambda: self.set_detection_orientation(Qt.Vertical))
 
     def load_setting(self):
         pass
+
+    def setup_compact_left_panel(self):
+        self.label_27.hide()
+        self.label_28.hide()
+        for widget in (self.label_8, self.checkBox, self.rateSpinBox, self.rateSlider, self.saveCheckBox):
+            widget.hide()
+
+        self.groupBox_8.setMinimumWidth(300)
+        self.groupBox_8.setMaximumWidth(300)
+        self.verticalLayout_8.setSpacing(8)
+        self.label_11.setText("巡检数据")
+
+        mode_layout = QHBoxLayout()
+        mode_layout.setSpacing(8)
+        self.horizontalModeButton = QPushButton("横向检测", self.groupBox_8)
+        self.verticalModeButton = QPushButton("纵向检测", self.groupBox_8)
+        for button in (self.horizontalModeButton, self.verticalModeButton):
+            button.setCheckable(True)
+            button.setMinimumHeight(34)
+            button.setCursor(Qt.PointingHandCursor)
+        mode_layout.addWidget(self.horizontalModeButton)
+        mode_layout.addWidget(self.verticalModeButton)
+        self.verticalLayout_7.insertLayout(1, mode_layout)
+
+        self.dataPanel = QFrame(self.groupBox_8)
+        self.dataPanel.setObjectName("dataPanel")
+        self.dataPanel.setStyleSheet("""
+QFrame#dataPanel {
+    background-color: rgba(20, 28, 36, 120);
+    border: 1px solid rgba(220, 220, 220, 90);
+    border-radius: 4px;
+}
+QLabel {
+    font-family: "Microsoft YaHei";
+    font-size: 14px;
+    color: rgb(218, 218, 218);
+}
+""")
+        data_layout = QGridLayout(self.dataPanel)
+        data_layout.setContentsMargins(10, 8, 10, 8)
+        data_layout.setHorizontalSpacing(10)
+        data_layout.setVerticalSpacing(7)
+
+        fields = [
+            ("work_mode", "模式"),
+            ("frame_index", "帧号"),
+            ("disease_count", "目标"),
+            ("tree", "果树"),
+            ("velocity", "速度"),
+            ("azimuth", "方位"),
+            ("battery", "电量"),
+            ("gps", "GPS"),
+            ("channels", "链路"),
+        ]
+        for row, (key, title) in enumerate(fields):
+            name_label = QLabel(title, self.dataPanel)
+            name_label.setStyleSheet('color: rgba(218, 218, 218, 170); font-size: 13px;')
+            value_label = QLabel("--", self.dataPanel)
+            value_label.setWordWrap(True)
+            value_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            data_layout.addWidget(name_label, row, 0)
+            data_layout.addWidget(value_label, row, 1)
+            self.realtime_value_labels[key] = value_label
+
+        self.verticalLayout_7.insertWidget(2, self.dataPanel)
+        self.resultWidget.setMinimumHeight(84)
+        self.resultWidget.setMaximumHeight(120)
+        self.resultWidget.setStyleSheet("""
+QListWidget{
+    background-color: rgba(12, 28, 77, 0);
+    border: 1px solid rgba(200, 200, 200, 90);
+    border-radius: 4px;
+    font-family: "Microsoft YaHei";
+    font-size: 14px;
+    color: rgb(218, 218, 218);
+}
+""")
+        self.set_detection_orientation(Qt.Horizontal)
+
+    def set_detection_orientation(self, orientation):
+        self.splitter.setOrientation(orientation)
+        if orientation == Qt.Horizontal:
+            self.label_6.setText("横向检测")
+            self.raw_video.setToolTip("原始画面")
+            self.out_video.setToolTip("检测结果")
+            self.splitter.setSizes([1, 1])
+        else:
+            self.label_6.setText("纵向检测")
+            self.raw_video.setToolTip("上方：原始画面")
+            self.out_video.setToolTip("下方：检测结果")
+            self.splitter.setSizes([1, 1])
+        self.horizontalModeButton.setChecked(orientation == Qt.Horizontal)
+        self.verticalModeButton.setChecked(orientation == Qt.Vertical)
+        self.refresh_detection_mode_style()
+
+    def refresh_detection_mode_style(self):
+        active_style = """
+QPushButton {
+    background-color: rgba(48, 148, 243, 170);
+    border: 1px solid rgba(230, 245, 255, 170);
+    border-radius: 4px;
+    color: white;
+    font: bold 14px "Microsoft YaHei";
+}
+"""
+        inactive_style = """
+QPushButton {
+    background-color: rgba(200, 200, 200, 35);
+    border: 1px solid rgba(200, 200, 200, 80);
+    border-radius: 4px;
+    color: rgb(218, 218, 218);
+    font: bold 14px "Microsoft YaHei";
+}
+QPushButton:hover {
+    background-color: rgba(48, 148, 243, 80);
+}
+"""
+        self.horizontalModeButton.setStyleSheet(active_style if self.horizontalModeButton.isChecked() else inactive_style)
+        self.verticalModeButton.setStyleSheet(active_style if self.verticalModeButton.isChecked() else inactive_style)
 
     def statistic_msg(self, msg):
         self.statistic_label.setText(msg)
@@ -825,6 +1125,28 @@ class MainWindow(QMainWindow, Ui_mainWindow):
         self.det_thread.is_continue = False
         self.statistic_msg('已停止')
 
+    def shutdown(self):
+        if self._closing:
+            return
+        self._closing = True
+
+        self.qtimer.stop()
+        if hasattr(self, "rtsp_win") and self.rtsp_win is not None:
+            try: self.rtsp_win.close()
+            except: pass
+
+        self.det_thread.jump_out = True
+        self.det_thread.is_continue = True
+        self.det_thread.cleanup_resources()
+
+        if self.det_thread.isRunning():
+            if not self.det_thread.wait(3000):
+                print("⚠️ 检测线程关闭超时，强制终止")
+                self.det_thread.terminate()
+                if not self.det_thread.wait(2000):
+                    print("⚠️ 检测线程仍未退出，直接结束进程")
+                    os._exit(0)
+
     def max_or_restore(self):
         self.showMaximized() if self.maxButton.isChecked() else self.showNormal()
 
@@ -840,17 +1162,100 @@ class MainWindow(QMainWindow, Ui_mainWindow):
         label.setPixmap(QPixmap.fromImage(qimg))
         label.setAlignment(Qt.AlignCenter)
 
+    @staticmethod
+    def format_gps_dms(gps_dms):
+        if not gps_dms or len(gps_dms) != 8:
+            return "--"
+        lat_d, lat_m, lat_s, lat_dir, lon_d, lon_m, lon_s, lon_dir = gps_dms
+        return f"{lat_d}°{lat_m}'{float(lat_s):.1f}\"{lat_dir} / {lon_d}°{lon_m}'{float(lon_s):.1f}\"{lon_dir}"
+
+    def set_realtime_value(self, key, value):
+        label = self.realtime_value_labels.get(key)
+        if label is not None:
+            label.setText(str(value))
+
+    def show_realtime_data(self, data):
+        status = data.get("status") or {}
+        tree_event = data.get("tree_event") or {}
+        channels = data.get("channels") or {}
+        active_channels = [name for name, enabled in channels.items() if enabled]
+
+        self.set_realtime_value("work_mode", data.get("work_mode", "--"))
+        self.set_realtime_value("frame_index", data.get("frame_index", "--"))
+        self.set_realtime_value("disease_count", f"{data.get('disease_count', 0)} 个")
+        self.set_realtime_value("tree", tree_event.get("tree_code", "--"))
+        self.set_realtime_value("velocity", f"{float(status.get('velocity', 0.0)):.2f} m/s")
+        self.set_realtime_value("azimuth", f"{float(status.get('azimuth', 0.0)):.0f}°")
+        self.set_realtime_value("battery", f"{status.get('soc', '--')}% / {float(status.get('bat_voltage', 0.0)):.1f}V")
+        self.set_realtime_value("gps", self.format_gps_dms(data.get("gps_dms")))
+        self.set_realtime_value("channels", " / ".join(active_channels) if active_channels else "本地")
+
     def show_statistic(self, statistic_dic):
         self.resultWidget.clear()
+        has_result = False
         for k, v in statistic_dic.items():
             if v > 0:
                 self.resultWidget.addItem(f'{k}：{v} 个')
+                has_result = True
+        if not has_result:
+            self.resultWidget.addItem('暂无病害目标')
 
     def closeEvent(self, event):
-        self.det_thread.jump_out = True
-        self.det_thread.wait()
+        self.shutdown()
         event.accept()
-        sys.exit(0)
+        app = QApplication.instance()
+        if app is not None:
+            QTimer.singleShot(0, app.quit)
+
+
+def should_run_headless(args):
+    if args.headless:
+        return True
+    if sys.platform.startswith("linux"):
+        return not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    return False
+
+
+def run_headless(config):
+    config["HEADLESS"] = True
+    app = QCoreApplication.instance() or QCoreApplication(sys.argv[:1])
+    worker = DetThread(config=config)
+    last_log = {"time": 0.0}
+
+    def log_fps(msg):
+        print(f"[headless] {msg}")
+
+    def log_message(msg):
+        print(f"[headless] {msg}")
+
+    def log_data(data):
+        now = time.time()
+        if now - last_log["time"] < 5:
+            return
+        last_log["time"] = now
+        status = data.get("status") or {}
+        print(
+            "[headless] "
+            f"帧:{data.get('frame_index', '--')} | "
+            f"目标:{data.get('disease_count', 0)} | "
+            f"速度:{float(status.get('velocity', 0.0)):.2f}m/s | "
+            f"电量:{status.get('soc', '--')}%"
+        )
+
+    worker.send_fps.connect(log_fps)
+    worker.send_msg.connect(log_message)
+    worker.send_data.connect(log_data)
+    print("[headless] 无界面模式启动：跳过窗口和视频渲染，仅执行检测/推流/上报")
+    try:
+        worker.run()
+    except KeyboardInterrupt:
+        print("[headless] 收到停止信号，正在清理资源")
+        worker.jump_out = True
+    finally:
+        worker.cleanup_resources()
+        app.quit()
+    return 0
+
 
 if __name__ == "__main__":
     # 如果需要命令行覆盖配置，可以在这里解析 args 并更新 CONFIG 字典
@@ -864,6 +1269,12 @@ if __name__ == "__main__":
     parser.add_argument('--raw-stream-only', action='store_true', help='只推送原始视频，跳过YOLO识别')
     parser.add_argument('--detect-stream', action='store_true', help='强制启用YOLO识别，覆盖预设中的纯推流模式')
     parser.add_argument('--auto-start', action='store_true', help='启动窗口后自动开始检测')
+    parser.add_argument('--headless', action='store_true', help='无图形界面运行，适合未接显示器的部署环境')
+    parser.add_argument('--enable-gps-serial', action='store_true', help='启用 GPS 串口接收')
+    parser.add_argument('--gps-port', type=str, default=None, help='覆盖 GPS 串口，例如 /dev/ttyUSB0 或 COM3')
+    parser.add_argument('--gps-baudrate', type=int, default=None, help='覆盖 GPS 串口波特率')
+    parser.add_argument('--gps-stale-timeout', type=float, default=None, help='覆盖 GPS 数据失效时间，单位秒')
+    parser.add_argument('--no-gps-auto-detect', action='store_true', help='关闭 GPS 串口自动查找，仅使用指定端口')
     args = parser.parse_args()
 
     # 如果命令行指定了配置方案，则覆盖默认值
@@ -885,10 +1296,24 @@ if __name__ == "__main__":
         CONFIG["RAW_STREAM_ONLY"] = True
     if args.detect_stream:
         CONFIG["RAW_STREAM_ONLY"] = False
+    if args.enable_gps_serial:
+        CONFIG["ENABLE_GPS_SERIAL"] = True
+    if args.gps_port:
+        CONFIG["GPS_SERIAL_PORT"] = args.gps_port
+    if args.gps_baudrate is not None:
+        CONFIG["GPS_SERIAL_BAUDRATE"] = args.gps_baudrate
+    if args.gps_stale_timeout is not None:
+        CONFIG["GPS_STALE_TIMEOUT"] = args.gps_stale_timeout
+    if args.no_gps_auto_detect:
+        CONFIG["GPS_SERIAL_AUTO_DETECT"] = False
+
+    if should_run_headless(args):
+        sys.exit(run_headless(CONFIG))
 
     app = QApplication(sys.argv)
     # 将配置好的 CONFIG 字典传给主窗口
     win = MainWindow(config=CONFIG)
+    app.aboutToQuit.connect(win.shutdown)
     win.show()
 
     # 默认不自动启动，避免 Windows 上没有摄像头时反复触发 Camera Error 0

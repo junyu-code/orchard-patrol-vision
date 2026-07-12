@@ -99,7 +99,7 @@ PRESET_CONFIGS = {
 }
 
 # 在这里选择默认配置：'client_a' | 'client_b' | 'both'
-ACTIVE_PRESET = "client_b"
+ACTIVE_PRESET = "client_a"
 PRESET_NAMES = tuple(PRESET_CONFIGS.keys())
 
 BASE_CONFIG = {
@@ -109,6 +109,19 @@ BASE_CONFIG = {
     "ENABLE_SERIAL": False,
     "SERIAL_PORT": "COM13",
     "BAUDRATE": 9600,
+
+    # GPS 串口接收配置，与病害串口发送器相互独立
+    "ENABLE_GPS_SERIAL": False,
+    "GPS_SERIAL_PORT": "",
+    "GPS_SERIAL_BAUDRATE": 9600,
+    "GPS_SERIAL_READ_TIMEOUT": 0.2,
+    "GPS_STALE_TIMEOUT": 1.0,
+    "GPS_RECONNECT_INTERVAL": 2.0,
+    "GPS_MAX_BUFFER_BYTES": 4096,
+    "GPS_SERIAL_AUTO_DETECT": True,
+    "GPS_SERIAL_PROBE_TIMEOUT": 1.5,
+    "GPS_EVENT_LOG_DIR": "./result/gps_events",
+    "GPS_EVENT_LOG_RETENTION_DAYS": 3,
 
     # YOLO 模型配置
     "WEIGHTS": "./pt/best.pt",

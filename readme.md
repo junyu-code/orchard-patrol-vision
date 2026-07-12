@@ -18,20 +18,6 @@
 - 果树 ID、GPS、速度、方向、电池等巡检数据模拟
 - 双甲方预设配置快速切换
 
-## 推荐项目目录名
-
-建议上传 GitHub 时使用：
-
-```text
-orchard-patrol-vision
-```
-
-中文项目名可写作：
-
-```text
-果园巡检视觉与推流系统
-```
-
 ## 目录结构
 
 ```text
@@ -117,11 +103,11 @@ python main.py --preset both
 
 配置含义：
 
-| 配置 | 说明 |
-| --- | --- |
-| `client_a` | 仅对接甲方 A：HTTP + RTMP |
-| `client_b` | 仅对接甲方 B：UDP + RTMP |
-| `both` | 同时开启 HTTP、UDP、RTMP，主要用于联调测试 |
+| 配置         | 说明                                       |
+| ------------ | ------------------------------------------ |
+| `client_a` | 仅对接甲方 A：HTTP + RTMP                  |
+| `client_b` | 仅对接甲方 B：UDP + RTMP                   |
+| `both`     | 同时开启 HTTP、UDP、RTMP，主要用于联调测试 |
 
 ## 甲方 B 推流与 UDP
 

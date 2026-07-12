@@ -20,5 +20,6 @@ pyqt5>=5.15.0
 
 # Utilities
 requests>=2.26.0
+pyserial>=3.5
 thop>=0.0.31
 tensorboard>=2.7.0

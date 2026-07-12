@@ -1,0 +1,19 @@
+[Unit]
+Description=Orchard Patrol Vision desktop launcher
+After=graphical.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+User=rm
+Group=rm
+WorkingDirectory=/home/rm/orchard-patrol-vision
+Environment=DISPLAY=:0
+Environment=QT_QPA_PLATFORM=xcb
+ExecStart=/bin/bash /home/rm/orchard-patrol-vision/detect.sh
+PIDFile=/home/rm/orchard-patrol-vision/detect.pid
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical.target

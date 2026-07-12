@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Orchard Patrol Vision
+Comment=Start orchard patrol vision after graphical login
+Exec=/bin/bash /home/rm/orchard-patrol-vision/detect.sh
+Path=/home/rm/orchard-patrol-vision
+Terminal=false
+X-GNOME-Autostart-enabled=true
