@@ -6,12 +6,14 @@
 
 from copy import deepcopy
 
-
 # 平台入口备忘：
 # 甲方A平台：https://judaonongye.hhzzss.cn/index
 # 甲方A本地凭据：CLIENT_A_USERNAME / CLIENT_A_PASSWORD 或 config/platform_accounts.local.json
 # 甲方B平台：https://www.xsjny.com/web/robot-analysis-ui/index.html
 # 甲方B本地凭据：CLIENT_B_USERNAME / CLIENT_B_PASSWORD 或 config/platform_accounts.local.json
+
+# 数据来源总开关：real | debug | simulation；默认调试模式
+DATA_MODE = "debug"
 
 # 预设配置方案：方便在不同甲方之间切换
 PRESET_CONFIGS = {
@@ -27,6 +29,10 @@ PRESET_CONFIGS = {
         "RAW_STREAM_ONLY": False,
         "SIMULATE_TREE_EVENTS": False,
         "ENABLE_PATROL_TIMELINE": False,
+        "ENABLE_GPS_SERIAL": True,
+        "GPS_SERIAL_PORT": "/dev/ttyGPS_IN",
+        "GPS_SERIAL_BAUDRATE": 9600,
+        "GPS_SERIAL_AUTO_DETECT": False,
     },
 
     # 甲方B：新的统一平台，使用 UDP + RTMP
@@ -105,6 +111,9 @@ PRESET_NAMES = tuple(PRESET_CONFIGS.keys())
 BASE_CONFIG = {
     "PRESET_NAME": ACTIVE_PRESET,
 
+    # 数据来源：real=全真实，debug=真实优先/缺失虚拟，simulation=全遥测虚拟
+    "DATA_MODE": DATA_MODE,
+
     # 串口配置
     "ENABLE_SERIAL": False,
     "SERIAL_PORT": "COM13",
@@ -120,6 +129,11 @@ BASE_CONFIG = {
     "GPS_MAX_BUFFER_BYTES": 4096,
     "GPS_SERIAL_AUTO_DETECT": True,
     "GPS_SERIAL_PROBE_TIMEOUT": 1.5,
+    "GPS_SPEED_MIN_INTERVAL": 1.0,
+    "GPS_SPEED_MAX_INTERVAL": 5.0,
+    "GPS_SPEED_MIN_DISTANCE": 0.3,
+    "GPS_SPEED_MAX_MPS": 8.0,
+    "GPS_SPEED_SMOOTHING_ALPHA": 0.35,
     "GPS_EVENT_LOG_DIR": "./result/gps_events",
     "GPS_EVENT_LOG_RETENTION_DAYS": 3,
 

@@ -6,9 +6,14 @@ from transport.gps_protocol import calculate_checksum
 from transport.gps_serial_receiver import GpsSerialReceiver
 
 
-def build_line(sequence=1, fix_quality=2):
+def build_line(
+    sequence=1,
+    fix_quality=2,
+    longitude=110.29557332,
+    latitude=25.06143046,
+):
     body = (
-        f"OPGPS,V1,Robot_001,{sequence},110.29557332,25.06143046,"
+        f"OPGPS,V1,Robot_001,{sequence},{longitude},{latitude},"
         f"140.48,{fix_quality},12,0.52"
     )
     return f"${body}*{calculate_checksum(body):02X}\r\n".encode("ascii")
@@ -57,6 +62,79 @@ def wait_until(predicate, timeout=1.0):
 
 
 class GpsSerialReceiverTests(unittest.TestCase):
+    def test_estimates_speed_after_two_valid_positions(self):
+        now = [1000]
+        receiver = GpsSerialReceiver(
+            port="TEST",
+            auto_detect=False,
+            serial_factory=lambda **kwargs: FakeSerial([]),
+            clock_ms=lambda: now[0],
+            speed_smoothing_alpha=1.0,
+        )
+
+        self.assertTrue(receiver._handle_line(build_line(sequence=1)))
+        self.assertIsNone(receiver.get_snapshot(now_ms=1000).speed_mps)
+
+        now[0] = 2000
+        self.assertTrue(receiver._handle_line(build_line(
+            sequence=2,
+            latitude=25.06143946,
+        )))
+
+        snapshot = receiver.get_snapshot(now_ms=2000)
+        self.assertAlmostEqual(snapshot.speed_mps, 1.0, delta=0.02)
+        self.assertEqual(receiver.get_stats()["speed_samples"], 1)
+
+    def test_small_position_jitter_estimates_zero_speed(self):
+        now = [1000]
+        receiver = GpsSerialReceiver(
+            port="TEST",
+            auto_detect=False,
+            serial_factory=lambda **kwargs: FakeSerial([]),
+            clock_ms=lambda: now[0],
+            speed_min_distance=0.3,
+        )
+
+        receiver._handle_line(build_line(sequence=1))
+        now[0] = 2000
+        receiver._handle_line(build_line(sequence=2, latitude=25.06143146))
+
+        self.assertEqual(receiver.get_snapshot(now_ms=2000).speed_mps, 0.0)
+
+    def test_rejects_implausible_position_jump(self):
+        now = [1000]
+        receiver = GpsSerialReceiver(
+            port="TEST",
+            auto_detect=False,
+            serial_factory=lambda **kwargs: FakeSerial([]),
+            clock_ms=lambda: now[0],
+            speed_max_mps=8.0,
+        )
+
+        receiver._handle_line(build_line(sequence=1))
+        now[0] = 2000
+        receiver._handle_line(build_line(sequence=2, latitude=25.07143046))
+
+        self.assertIsNone(receiver.get_snapshot(now_ms=2000).speed_mps)
+        self.assertEqual(receiver.get_stats()["speed_rejections"], 1)
+
+    def test_stale_position_hides_estimated_speed(self):
+        now = [1000]
+        receiver = GpsSerialReceiver(
+            port="TEST",
+            auto_detect=False,
+            serial_factory=lambda **kwargs: FakeSerial([]),
+            clock_ms=lambda: now[0],
+            stale_timeout=1.0,
+        )
+
+        receiver._handle_line(build_line(sequence=1))
+        now[0] = 2000
+        receiver._handle_line(build_line(sequence=2, latitude=25.06143946))
+
+        self.assertIsNotNone(receiver.get_snapshot(now_ms=2000).speed_mps)
+        self.assertIsNone(receiver.get_snapshot(now_ms=3001).speed_mps)
+
     def test_invalid_packet_does_not_replace_latest_fix(self):
         now = [1000]
         valid = build_line(sequence=1)

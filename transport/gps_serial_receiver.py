@@ -18,6 +18,7 @@ from .gps_protocol import (
     GpsLineBuffer,
     GpsProtocolError,
     GpsSnapshot,
+    great_circle_distance_m,
     parse_gps_sentence,
 )
 
@@ -39,6 +40,11 @@ class GpsSerialReceiver:
         serial_factory: Optional[Callable] = None,
         port_provider: Optional[Callable[[], Iterable]] = None,
         clock_ms: Optional[Callable[[], int]] = None,
+        speed_min_interval: float = 1.0,
+        speed_max_interval: float = 5.0,
+        speed_min_distance: float = 0.3,
+        speed_max_mps: float = 8.0,
+        speed_smoothing_alpha: float = 0.35,
     ):
         self.port = str(port or "").strip()
         self.baudrate = int(baudrate)
@@ -50,6 +56,15 @@ class GpsSerialReceiver:
         self.max_buffer_bytes = max(128, int(max_buffer_bytes))
         self.auto_detect = bool(auto_detect)
         self.probe_timeout = max(self.read_timeout, float(probe_timeout))
+        self.speed_min_interval = max(0.1, float(speed_min_interval))
+        self.speed_max_interval = max(
+            self.speed_min_interval, float(speed_max_interval)
+        )
+        self.speed_min_distance = max(0.0, float(speed_min_distance))
+        self.speed_max_mps = max(0.1, float(speed_max_mps))
+        self.speed_smoothing_alpha = min(
+            1.0, max(0.01, float(speed_smoothing_alpha))
+        )
         self.excluded_ports = {
             self._normalize_port_name(value)
             for value in (excluded_ports or [])
@@ -75,6 +90,8 @@ class GpsSerialReceiver:
         self._active_port = None
         self._has_connected_once = False
         self._latest_fix: Optional[GpsFix] = None
+        self._speed_anchor_fix: Optional[GpsFix] = None
+        self._latest_speed_mps: Optional[float] = None
         self._last_error_log_at = 0.0
         self._stats = {
             "valid_packets": 0,
@@ -86,6 +103,8 @@ class GpsSerialReceiver:
             "reconnects": 0,
             "scan_cycles": 0,
             "probe_failures": 0,
+            "speed_samples": 0,
+            "speed_rejections": 0,
         }
 
     @property
@@ -122,6 +141,7 @@ class GpsSerialReceiver:
         """返回最新 GPS 的不可变快照。"""
         with self._lock:
             latest = self._latest_fix
+            speed_mps = self._latest_speed_mps
         if latest is None:
             return GpsSnapshot.empty()
 
@@ -133,6 +153,9 @@ class GpsSerialReceiver:
             age_ms=age_ms,
             stale=stale,
             valid=latest.position_valid and not stale,
+            speed_mps=(
+                speed_mps if latest.position_valid and not stale else None
+            ),
         )
 
     def get_stats(self) -> dict:
@@ -251,9 +274,58 @@ class GpsSerialReceiver:
             return False
 
         with self._lock:
+            self._update_speed_locked(fix)
             self._latest_fix = fix
             self._stats["valid_packets"] += 1
         return True
+
+    def _update_speed_locked(self, fix: GpsFix):
+        if not fix.position_valid:
+            self._speed_anchor_fix = None
+            self._latest_speed_mps = None
+            return
+
+        previous = self._speed_anchor_fix
+        if previous is None:
+            self._speed_anchor_fix = fix
+            return
+
+        elapsed_s = (fix.received_at_ms - previous.received_at_ms) / 1000.0
+        if elapsed_s <= 0:
+            self._stats["speed_rejections"] += 1
+            return
+        if elapsed_s < self.speed_min_interval:
+            return
+
+        if elapsed_s > self.speed_max_interval:
+            self._speed_anchor_fix = fix
+            self._latest_speed_mps = None
+            self._stats["speed_rejections"] += 1
+            return
+
+        distance_m = great_circle_distance_m(
+            previous.latitude,
+            previous.longitude,
+            fix.latitude,
+            fix.longitude,
+        )
+        raw_speed_mps = (
+            0.0 if distance_m < self.speed_min_distance else distance_m / elapsed_s
+        )
+        if raw_speed_mps > self.speed_max_mps:
+            self._latest_speed_mps = None
+            self._stats["speed_rejections"] += 1
+            return
+
+        self._speed_anchor_fix = fix
+        if self._latest_speed_mps is None:
+            self._latest_speed_mps = raw_speed_mps
+        else:
+            alpha = self.speed_smoothing_alpha
+            self._latest_speed_mps = (
+                alpha * raw_speed_mps + (1.0 - alpha) * self._latest_speed_mps
+            )
+        self._stats["speed_samples"] += 1
 
     def _activate_port(self, port: str):
         with self._lock:

@@ -30,6 +30,8 @@ orchard-patrol-vision/
 ├─ transport/
 │  ├─ http_sender.py               # 甲方 A HTTP 上报
 │  ├─ udp_sender.py                # 甲方 B UDP 发送
+│  ├─ gps_serial_receiver.py       # OPGPS 串口接收与重连
+│  ├─ serial_sender.py             # STM32 病害帧辅助输出
 │  ├─ robot_protocol.py            # 甲方 B UDP 数据包协议
 │  ├─ patrol_timeline.py           # 甲方 B 巡检果树时间轴
 │  ├─ virtual_sensor.py            # GPS、速度、方向、电池等虚拟传感器
@@ -48,6 +50,18 @@ orchard-patrol-vision/
 更多结构说明见 `docs/PROJECT_STRUCTURE.md`。
 
 ## 快速运行
+
+### 数据来源模式
+
+默认使用调试模式：真实数据逐字段优先，缺失的机器人遥测使用虚拟值补齐。
+
+```bash
+python main.py --data-mode real        # 全真实，缺失保持为空
+python main.py --data-mode debug       # 真实优先，缺失使用虚拟值
+python main.py --data-mode simulation  # 强制全部遥测使用虚拟值
+```
+
+详细规则和缺失值处理见 `docs/DATA_MODES.md`。
 
 ### 1. 安装依赖
 
@@ -160,7 +174,21 @@ python tools/robot_udp_simulator.py
 
 # 测试 RTMP 推流连通性
 python tools/rtmp_probe.py
+
+# 无硬件串口回环自测
+python tools/serial_self_test.py loopback
+
+# GPS 串口接收自测
+python tools/serial_self_test.py gps --port /dev/ttyGPS_IN --duration 10
 ```
+
+两只 USB-TTL 交叉连接并共地后，可运行双向收发和 OPGPS 快速测试：
+
+```bash
+python tools/quick_gps_receive_test.py
+```
+
+串口接线、物理回环和权限排查见 `docs/SERIAL_SELF_TEST.md`。
 
 ## 注意事项
 

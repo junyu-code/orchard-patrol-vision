@@ -10,7 +10,24 @@ PYTHON_BIN="/home/rm/miniconda3/envs/detect/bin/python"
 
 # 3. 主程序文件名
 MAIN_SCRIPT="main.py"
-MAIN_ARGS=(--preset client_a --source 0 --auto-start)
+RUN_FOREGROUND=false
+if [ "${1:-}" = "--foreground" ]; then
+    RUN_FOREGROUND=true
+    shift
+fi
+GPS_SERIAL_PORT="${GPS_SERIAL_PORT:-/dev/ttyGPS_IN}"
+GPS_SERIAL_BAUDRATE="${GPS_SERIAL_BAUDRATE:-9600}"
+DATA_MODE="${DATA_MODE:-debug}"
+MAIN_ARGS=(
+    --preset client_a
+    --data-mode "${DATA_MODE}"
+    --source 0
+    --auto-start
+    --enable-gps-serial
+    --gps-port "${GPS_SERIAL_PORT}"
+    --gps-baudrate "${GPS_SERIAL_BAUDRATE}"
+    --no-gps-auto-detect
+)
 
 # 4. 日志配置
 LOG_DIR="${PROJECT_DIR}/logs"
@@ -84,17 +101,28 @@ fi
 export DISPLAY=:0
 # 强制使用 XCB 平台插件，避免 Wayland 冲突
 export QT_QPA_PLATFORM=xcb
+# 让 nohup 日志实时落盘，便于现场确认 GPS 串口打开和解析状态
+export PYTHONUNBUFFERED=1
 # 如果有其他库路径问题，可以在这里添加 LD_LIBRARY_PATH
 
 # 7. 启动程序
 echo "[$(date)] 正在使用环境: ${PYTHON_BIN} 启动程序..." >> "${LOG_FILE}"
+echo "[$(date)] GPS串口接收: ${GPS_SERIAL_PORT} @ ${GPS_SERIAL_BAUDRATE}" >> "${LOG_FILE}"
+echo "[$(date)] 数据模式: ${DATA_MODE}" >> "${LOG_FILE}"
 
-# nohup: 后台运行，即使终端关闭也不停止
-# & : 放入后台
-# >> "${LOG_FILE}" 2>&1 : 将标准输出和错误输出都追加到日志文件
-nohup "${PYTHON_BIN}" "${MAIN_SCRIPT}" "${MAIN_ARGS[@]}" >> "${LOG_FILE}" 2>&1 &
+if [ "${RUN_FOREGROUND}" = true ]; then
+    # systemd must own the real Python PID. exec prevents an orphaned nohup
+    # process and lets a normal GUI close remain a successful service exit.
+    echo $$ > "${PROJECT_DIR}/detect.pid"
+    echo "[$(date)] systemd 前台模式启动，PID: $$" >> "${LOG_FILE}"
+    echo "[$(date)] 日志文件位置: ${LOG_FILE}" >> "${LOG_FILE}"
+    exec "${PYTHON_BIN}" -u "${MAIN_SCRIPT}" "${MAIN_ARGS[@]}" >> "${LOG_FILE}" 2>&1
+fi
+
+# Desktop autostart returns immediately and leaves the GUI in the background.
+nohup "${PYTHON_BIN}" -u "${MAIN_SCRIPT}" "${MAIN_ARGS[@]}" >> "${LOG_FILE}" 2>&1 &
 
 # 8. 记录进程 ID (PID)，方便后续手动停止
 echo $! > "${PROJECT_DIR}/detect.pid"
-echo "[$(date)] 程序已启动，PID: $!" >> "${LOG_FILE}"
+echo "[$(date)] 桌面后台模式启动，PID: $!" >> "${LOG_FILE}"
 echo "[$(date)] 日志文件位置: ${LOG_FILE}" >> "${LOG_FILE}"

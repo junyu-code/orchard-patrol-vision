@@ -29,9 +29,11 @@
 ## 辅助和实验代码
 
 - `transport/`：正式业务传输模块，包括甲方A HTTP、甲方B UDP、RTMP 推流、UDP 协议、甲方B巡检时间轴和虚拟传感器。
+- `transport/data_mode.py`：真实、调试、仿真三态数据源选择和逐字段回退策略。
 - `serial_utils/`：旧版串口/TCP 辅助模块，和 `transport/` 有部分功能重叠。
 - `tools/check_names.py`：查看 `pt/best.pt` 中类别名称的辅助脚本。
 - `tools/robot_udp_simulator.py`：甲方B UDP 独立测试工具。
+- `tools/serial_self_test.py`：病害帧串口回环和 GPS OPGPS 接收自测工具。
 - `tools/video_reverse_merge.py`：生成正序 + 逆序合并视频的工具；当前甲方B演示已支持运行时正放/倒放循环，通常不需要预生成。
 - `tools/test-video-push.bat`：独立 RTSP/RTMP 推流测试脚本。
 - `tools/archive/`：旧版机器人推流完整入口备份，不再作为正式入口。

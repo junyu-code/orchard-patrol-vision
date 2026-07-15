@@ -9,6 +9,7 @@ from typing import List, Optional, Tuple, Union
 PROTOCOL_NAME = "OPGPS"
 PROTOCOL_VERSION = "V1"
 VALID_FIX_QUALITIES = {0, 1, 2, 4, 5}
+EARTH_RADIUS_M = 6371008.8
 
 
 class GpsProtocolError(ValueError):
@@ -50,10 +51,11 @@ class GpsSnapshot:
     age_ms: Optional[int]
     stale: bool
     valid: bool
+    speed_mps: Optional[float] = None
 
     @classmethod
     def empty(cls) -> "GpsSnapshot":
-        return cls(fix=None, age_ms=None, stale=True, valid=False)
+        return cls(fix=None, age_ms=None, stale=True, valid=False, speed_mps=None)
 
     def to_dict(self) -> dict:
         if self.fix is None:
@@ -72,6 +74,7 @@ class GpsSnapshot:
                 "satellites": None,
                 "hdop": None,
                 "received_at_ms": None,
+                "speed_mps": None,
             }
 
         data = self.fix.to_dict()
@@ -80,6 +83,7 @@ class GpsSnapshot:
             "valid": self.valid,
             "stale": self.stale,
             "age_ms": self.age_ms,
+            "speed_mps": self.speed_mps,
         })
         return data
 
@@ -141,6 +145,26 @@ def calculate_checksum(payload: Union[str, bytes]) -> int:
     for value in raw:
         checksum ^= value
     return checksum
+
+
+def great_circle_distance_m(
+    latitude_a: float,
+    longitude_a: float,
+    latitude_b: float,
+    longitude_b: float,
+) -> float:
+    """Return surface distance in metres between two decimal-degree positions."""
+    latitude_a_rad = math.radians(float(latitude_a))
+    latitude_b_rad = math.radians(float(latitude_b))
+    latitude_delta = latitude_b_rad - latitude_a_rad
+    longitude_delta = math.radians(float(longitude_b) - float(longitude_a))
+    haversine = (
+        math.sin(latitude_delta / 2.0) ** 2
+        + math.cos(latitude_a_rad)
+        * math.cos(latitude_b_rad)
+        * math.sin(longitude_delta / 2.0) ** 2
+    )
+    return 2.0 * EARTH_RADIUS_M * math.asin(min(1.0, math.sqrt(haversine)))
 
 
 def parse_gps_sentence(
