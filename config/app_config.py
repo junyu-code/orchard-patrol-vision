@@ -4,6 +4,7 @@
 本地凭据请放在 `config/platform_accounts.local.json`，该文件已加入 .gitignore。
 """
 
+import os
 from copy import deepcopy
 
 # 平台入口备忘：
@@ -22,7 +23,7 @@ PRESET_CONFIGS = {
         "ENABLE_HTTP": True,
         "HTTP_URL": "https://api.jdpm.hhzzss.cn/agriculture/position/robotPost",
         "ENABLE_RTMP": True,
-        "RTMP_URL": "rtmp://sip.jdny.hhzzss.cn:21935/116/D13Z94P4P30H?sign=REMOVED",
+        "RTMP_URL": os.getenv("CLIENT_A_RTMP_URL", ""),
         "ENABLE_UDP": False,
         "UDP_HOST": "",
         "UDP_PORT": 0,
