@@ -1753,23 +1753,33 @@ QPushButton#recordButton[recording="true"] {
     def refresh_detection_mode_style(self):
         active_style = """
 QPushButton {
-    background-color: rgba(48, 148, 243, 170);
-    border: 1px solid rgba(230, 245, 255, 170);
+    background-color: rgba(68, 126, 85, 185);
+    border: 1px solid rgba(157, 195, 165, 150);
     border-radius: 4px;
-    color: white;
+    color: #edf5ee;
     font: bold 14px "Microsoft YaHei";
+}
+QPushButton:hover {
+    background-color: rgba(78, 143, 96, 205);
+}
+QPushButton:pressed {
+    background-color: rgba(56, 109, 72, 215);
 }
 """
         inactive_style = """
 QPushButton {
-    background-color: rgba(200, 200, 200, 35);
-    border: 1px solid rgba(200, 200, 200, 80);
+    background-color: rgba(202, 215, 205, 28);
+    border: 1px solid rgba(171, 194, 177, 82);
     border-radius: 4px;
-    color: rgb(218, 218, 218);
+    color: #d6ded8;
     font: bold 14px "Microsoft YaHei";
 }
 QPushButton:hover {
-    background-color: rgba(48, 148, 243, 80);
+    background-color: rgba(75, 133, 89, 92);
+    border-color: rgba(157, 195, 165, 125);
+}
+QPushButton:pressed {
+    background-color: rgba(61, 115, 75, 130);
 }
 """
         self.horizontalModeButton.setStyleSheet(active_style if self.horizontalModeButton.isChecked() else inactive_style)

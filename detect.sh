@@ -20,7 +20,8 @@ if [ "${1:-}" = "--foreground" ]; then
     RUN_FOREGROUND=true
     shift
 fi
-TELEMETRY_SERIAL_PORT="${TELEMETRY_SERIAL_PORT:-/dev/ttyTELEMETRY_IN}"
+# 当前 USB 转串口设备由 udev 映射为 ttyGPS_IN；保留环境变量覆盖入口。
+TELEMETRY_SERIAL_PORT="${TELEMETRY_SERIAL_PORT:-/dev/ttyGPS_IN}"
 TELEMETRY_SERIAL_BAUDRATE="${TELEMETRY_SERIAL_BAUDRATE:-9600}"
 DATA_MODE="${DATA_MODE:-debug}"
 APP_PRESET="${APP_PRESET:-client_b}"

@@ -12,7 +12,7 @@ WorkingDirectory=/home/rm/orchard-patrol-vision
 Environment=DISPLAY=:0
 Environment=QT_QPA_PLATFORM=xcb
 Environment=DATA_MODE=debug
-Environment=TELEMETRY_SERIAL_PORT=/dev/ttyTELEMETRY_IN
+Environment=TELEMETRY_SERIAL_PORT=/dev/ttyGPS_IN
 Environment=TELEMETRY_SERIAL_BAUDRATE=9600
 ExecStart=/bin/bash /home/rm/orchard-patrol-vision/detect.sh --foreground
 KillMode=control-group
