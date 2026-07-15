@@ -23,8 +23,9 @@ fi
 TELEMETRY_SERIAL_PORT="${TELEMETRY_SERIAL_PORT:-/dev/ttyTELEMETRY_IN}"
 TELEMETRY_SERIAL_BAUDRATE="${TELEMETRY_SERIAL_BAUDRATE:-9600}"
 DATA_MODE="${DATA_MODE:-debug}"
+APP_PRESET="${APP_PRESET:-client_b}"
 MAIN_ARGS=(
-    --preset client_a
+    --preset "${APP_PRESET}"
     --data-mode "${DATA_MODE}"
     --source 0
     --auto-start
@@ -112,6 +113,7 @@ export PYTHONUNBUFFERED=1
 
 # 7. 启动程序
 echo "[$(date)] 正在使用环境: ${PYTHON_BIN} 启动程序..." >> "${LOG_FILE}"
+echo "[$(date)] 业务预设: ${APP_PRESET}" >> "${LOG_FILE}"
 echo "[$(date)] 电控遥测串口: ${TELEMETRY_SERIAL_PORT} @ ${TELEMETRY_SERIAL_BAUDRATE}" >> "${LOG_FILE}"
 echo "[$(date)] 数据模式: ${DATA_MODE}" >> "${LOG_FILE}"
 

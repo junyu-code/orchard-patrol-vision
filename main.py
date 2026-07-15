@@ -1327,11 +1327,11 @@ class MainWindow(QMainWindow, Ui_mainWindow):
         self.leftScrollArea.setFixedWidth(334)
         self.leftScrollArea.setStyleSheet("""
 QScrollArea#leftScrollArea {
-    background-color: rgba(26, 31, 31, 238);
+    background: transparent;
     border: none;
 }
 QScrollArea#leftScrollArea > QWidget > QWidget {
-    background-color: rgba(26, 31, 31, 238);
+    background: transparent;
 }
 """)
         self.leftScrollArea.verticalScrollBar().setStyleSheet("""
@@ -1369,9 +1369,9 @@ QScrollBar::sub-page:vertical {
         self.groupBox_8.setMaximumWidth(16777215)
         self.groupBox_8.setStyleSheet("""
 QGroupBox#groupBox_8 {
-    background-color: rgba(26, 31, 31, 238);
+    background-color: rgba(52, 60, 57, 205);
     border: none;
-    border-right: 1px solid rgba(255, 255, 255, 35);
+    border-right: 1px solid rgba(255, 255, 255, 48);
     border-radius: 0;
 }
 """)
@@ -1404,8 +1404,8 @@ QLabel {
         self.dataPanel.setObjectName("dataPanel")
         self.dataPanel.setStyleSheet("""
 QFrame#dataPanel {
-    background-color: rgba(8, 13, 13, 128);
-    border: 1px solid rgba(255, 255, 255, 45);
+    background-color: rgba(27, 33, 31, 155);
+    border: 1px solid rgba(255, 255, 255, 58);
     border-radius: 6px;
 }
 QLabel[role="panelTitle"] {
