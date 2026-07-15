@@ -30,6 +30,15 @@ Linux 部署脚本支持环境变量，未指定时为 `debug`：
 DATA_MODE=real ./detect.sh
 ```
 
+公共脚本默认保持甲方 A 和通用遥测设备名。甲方 B 现场可以显式覆盖，仓库中的 systemd 服务已经使用这组配置：
+
+```bash
+APP_PRESET=client_b \
+TELEMETRY_SERIAL_PORT=/dev/ttyGPS_IN \
+DATA_MODE=debug \
+./detect.sh
+```
+
 甲方 B 的本地演示脚本已显式指定 `simulation`，不会读取或混入现场电控串口数据。
 
 ## 真实数据优先级

@@ -1327,11 +1327,11 @@ class MainWindow(QMainWindow, Ui_mainWindow):
         self.leftScrollArea.setFixedWidth(334)
         self.leftScrollArea.setStyleSheet("""
 QScrollArea#leftScrollArea {
-    background-color: rgba(26, 31, 31, 238);
+    background: transparent;
     border: none;
 }
 QScrollArea#leftScrollArea > QWidget > QWidget {
-    background-color: rgba(26, 31, 31, 238);
+    background: transparent;
 }
 """)
         self.leftScrollArea.verticalScrollBar().setStyleSheet("""
@@ -1369,9 +1369,9 @@ QScrollBar::sub-page:vertical {
         self.groupBox_8.setMaximumWidth(16777215)
         self.groupBox_8.setStyleSheet("""
 QGroupBox#groupBox_8 {
-    background-color: rgba(26, 31, 31, 238);
+    background-color: rgba(52, 60, 57, 205);
     border: none;
-    border-right: 1px solid rgba(255, 255, 255, 35);
+    border-right: 1px solid rgba(255, 255, 255, 48);
     border-radius: 0;
 }
 """)
@@ -1404,8 +1404,8 @@ QLabel {
         self.dataPanel.setObjectName("dataPanel")
         self.dataPanel.setStyleSheet("""
 QFrame#dataPanel {
-    background-color: rgba(8, 13, 13, 128);
-    border: 1px solid rgba(255, 255, 255, 45);
+    background-color: rgba(27, 33, 31, 155);
+    border: 1px solid rgba(255, 255, 255, 58);
     border-radius: 6px;
 }
 QLabel[role="panelTitle"] {
@@ -1753,23 +1753,33 @@ QPushButton#recordButton[recording="true"] {
     def refresh_detection_mode_style(self):
         active_style = """
 QPushButton {
-    background-color: rgba(48, 148, 243, 170);
-    border: 1px solid rgba(230, 245, 255, 170);
+    background-color: rgba(68, 126, 85, 185);
+    border: 1px solid rgba(157, 195, 165, 150);
     border-radius: 4px;
-    color: white;
+    color: #edf5ee;
     font: bold 14px "Microsoft YaHei";
+}
+QPushButton:hover {
+    background-color: rgba(78, 143, 96, 205);
+}
+QPushButton:pressed {
+    background-color: rgba(56, 109, 72, 215);
 }
 """
         inactive_style = """
 QPushButton {
-    background-color: rgba(200, 200, 200, 35);
-    border: 1px solid rgba(200, 200, 200, 80);
+    background-color: rgba(202, 215, 205, 28);
+    border: 1px solid rgba(171, 194, 177, 82);
     border-radius: 4px;
-    color: rgb(218, 218, 218);
+    color: #d6ded8;
     font: bold 14px "Microsoft YaHei";
 }
 QPushButton:hover {
-    background-color: rgba(48, 148, 243, 80);
+    background-color: rgba(75, 133, 89, 92);
+    border-color: rgba(157, 195, 165, 125);
+}
+QPushButton:pressed {
+    background-color: rgba(61, 115, 75, 130);
 }
 """
         self.horizontalModeButton.setStyleSheet(active_style if self.horizontalModeButton.isChecked() else inactive_style)

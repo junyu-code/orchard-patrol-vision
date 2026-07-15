@@ -75,6 +75,31 @@ class DataModeTests(unittest.TestCase):
             self.virtual_dms,
         )
 
+    def test_debug_falls_back_when_fresh_snapshot_has_no_gps_field(self):
+        class FreshSnapshotWithoutGps:
+            valid = True
+
+            @staticmethod
+            def to_dms():
+                return None
+
+        policy = get_data_mode_policy(DEBUG_MODE)
+        self.assertEqual(
+            select_gps_dms(
+                policy,
+                FreshSnapshotWithoutGps(),
+                self.virtual_dms,
+            ),
+            self.virtual_dms,
+        )
+        self.assertIsNone(
+            select_gps_dms(
+                get_data_mode_policy(REAL_MODE),
+                FreshSnapshotWithoutGps(),
+                self.virtual_dms,
+            )
+        )
+
     def test_simulation_ignores_real_snapshot(self):
         policy = get_data_mode_policy(SIMULATION_MODE)
         selected = select_gps_dms(
