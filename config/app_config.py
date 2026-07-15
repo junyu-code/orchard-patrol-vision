@@ -4,7 +4,12 @@
 本地凭据请放在 `config/platform_accounts.local.json`，该文件已加入 .gitignore。
 """
 
+import os
 from copy import deepcopy
+
+
+# 数据来源总开关：real | debug | simulation；默认调试模式
+DATA_MODE = "debug"
 
 
 # 平台入口备忘：
@@ -20,7 +25,7 @@ PRESET_CONFIGS = {
         "ENABLE_HTTP": True,
         "HTTP_URL": "https://api.jdpm.hhzzss.cn/agriculture/position/robotPost",
         "ENABLE_RTMP": True,
-        "RTMP_URL": "rtmp://sip.jdny.hhzzss.cn:21935/116/D13Z94P4P30H?sign=41db35390ddad33f83944f44b8b75ded",
+        "RTMP_URL": os.getenv("CLIENT_A_RTMP_URL", ""),
         "ENABLE_UDP": False,
         "UDP_HOST": "",
         "UDP_PORT": 0,
@@ -104,11 +109,23 @@ PRESET_NAMES = tuple(PRESET_CONFIGS.keys())
 
 BASE_CONFIG = {
     "PRESET_NAME": ACTIVE_PRESET,
+    "DATA_MODE": DATA_MODE,
 
-    # 串口配置
+    # 旧病害发送串口；当前主流程不向电控返回数据
     "ENABLE_SERIAL": False,
     "SERIAL_PORT": "COM13",
     "BAUDRATE": 9600,
+
+    # 电控统一遥测串口（58 字节 OP-Telemetry V1）
+    "ENABLE_TELEMETRY_SERIAL": False,
+    "TELEMETRY_SERIAL_PORT": os.getenv("TELEMETRY_SERIAL_PORT", ""),
+    "TELEMETRY_SERIAL_BAUDRATE": 9600,
+    "TELEMETRY_SERIAL_READ_TIMEOUT": 0.2,
+    "TELEMETRY_STALE_TIMEOUT": 1.0,
+    "TELEMETRY_RECONNECT_INTERVAL": 2.0,
+    "TELEMETRY_MAX_BUFFER_BYTES": 4096,
+    "TELEMETRY_SERIAL_AUTO_DETECT": True,
+    "TELEMETRY_SERIAL_PROBE_TIMEOUT": 1.5,
 
     # GPS 串口接收配置，与病害串口发送器相互独立
     "ENABLE_GPS_SERIAL": False,
@@ -120,6 +137,11 @@ BASE_CONFIG = {
     "GPS_MAX_BUFFER_BYTES": 4096,
     "GPS_SERIAL_AUTO_DETECT": True,
     "GPS_SERIAL_PROBE_TIMEOUT": 1.5,
+    "GPS_SPEED_MIN_INTERVAL": 1.0,
+    "GPS_SPEED_MAX_INTERVAL": 5.0,
+    "GPS_SPEED_MIN_DISTANCE": 0.3,
+    "GPS_SPEED_MAX_MPS": 8.0,
+    "GPS_SPEED_SMOOTHING_ALPHA": 0.35,
     "GPS_EVENT_LOG_DIR": "./result/gps_events",
     "GPS_EVENT_LOG_RETENTION_DAYS": 3,
 

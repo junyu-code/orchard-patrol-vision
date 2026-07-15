@@ -40,12 +40,14 @@ ACTIVE_PRESET = "client_a"  # 默认使用甲方A的配置
 ### 预设配置定义（config/app_config.py）
 
 ```python
+import os
+
 PRESET_CONFIGS = {
     "client_a": {
         "ENABLE_HTTP": True,
         "HTTP_URL": "https://api.jdpm.hhzzss.cn/agriculture/position/robotPost",
         "ENABLE_RTMP": True,
-        "RTMP_URL": "rtmp://sip.jdny.hhzzss.cn:21935/xiaoche/xiaoche002?sign=...",
+        "RTMP_URL": os.getenv("CLIENT_A_RTMP_URL", ""),
         "ENABLE_UDP": False,
     },
     "client_b": {
@@ -61,6 +63,8 @@ PRESET_CONFIGS = {
     }
 }
 ```
+
+甲方 A 的真实 RTMP 地址可能包含签名，应通过 `CLIENT_A_RTMP_URL` 环境变量在部署机器本地配置，不得提交到仓库或写入文档。
 
 ## 🚀 使用流程
 

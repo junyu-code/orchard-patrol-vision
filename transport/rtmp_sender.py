@@ -1,11 +1,18 @@
 import subprocess
 
+
+def _display_rtmp_url(url):
+    """隐藏 RTMP 查询参数，避免签名进入控制台和日志。"""
+    base_url, separator, _ = str(url or "").partition("?")
+    return f"{base_url}?<redacted>" if separator else base_url
+
+
 class RtmpSender:
     """RTMP推流类：通过FFmpeg将OpenCV图像推送到RTMP服务器"""
     
     def __init__(
         self,
-        rtmp_url="rtmp://sip.jdny.hhzzss.cn:21935/xiaoche/xiaoche002?sign=41db35390ddad33f83944f44b8b75ded",
+        rtmp_url="",
         video_bitrate="700k",
         maxrate="900k",
         bufsize="1400k",
@@ -26,6 +33,9 @@ class RtmpSender:
         :param height: 视频高度
         :param fps: 帧率
         """
+        if not self.rtmp_url:
+            print("错误: 未配置 RTMP 推流地址")
+            return False
         if self.is_running:
             return
             
@@ -83,7 +93,7 @@ class RtmpSender:
             )
             self.is_running = True
             print(
-                f"RTMP推流已启动: {self.rtmp_url} "
+                f"RTMP推流已启动: {_display_rtmp_url(self.rtmp_url)} "
                 f"({width}x{height}@{fps}fps, {self.video_bitrate})"
             )
         except FileNotFoundError:

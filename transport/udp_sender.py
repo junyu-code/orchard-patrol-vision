@@ -79,8 +79,21 @@ class UdpSender:
         jitter = random.randint(-self.tree_jitter, self.tree_jitter)
         return int(frame_index + max(1, self.tree_interval + jitter))
 
-    def _update_tree_indices(self, frame_index, disease_detected, tree_event=None):
+    def _update_tree_indices(
+        self,
+        frame_index,
+        disease_detected,
+        tree_event=None,
+        explicit_tree_indices=None,
+    ):
         """更新左右果树编号；协议要求无树时编号为 0。"""
+        if explicit_tree_indices is not None:
+            left_tree_id, right_tree_id = explicit_tree_indices
+            self.left_tree_index = max(0, min(65535, int(left_tree_id)))
+            self.right_tree_index = max(0, min(65535, int(right_tree_id)))
+            self.tree_hold_remaining = 0
+            return
+
         if tree_event:
             left_tree_id = int(tree_event.get("left_tree_id", tree_event.get("tree_id", self.next_tree_number)))
             right_tree_id = int(tree_event.get("right_tree_id", left_tree_id + 1))
@@ -133,7 +146,8 @@ class UdpSender:
                        bat_voltage=240,
                        soc=85,
                        disease_detected=False,
-                       tree_event=None):
+                       tree_event=None,
+                       explicit_tree_indices=None):
         """
         发送机器人数据
 
@@ -149,6 +163,7 @@ class UdpSender:
             soc: 剩余电量 (0-100%)
             disease_detected: 是否检测到病害 (用于更新果树编号)
             tree_event: 甲方B演示时间轴触发的果树事件，格式为 {"tree_id": 1, "tree_code": "ID0001"}
+            explicit_tree_indices: 电控提供的 (左树编号, 右树编号)，包含 (0, 0)
         """
         try:
             # 获取当前时间
@@ -158,7 +173,12 @@ class UdpSender:
             second = now.second
 
             # 更新左右果树编号；甲方B固定巡检事件优先，其次才是识别结果或备用随机模拟
-            self._update_tree_indices(frame_index, disease_detected, tree_event=tree_event)
+            self._update_tree_indices(
+                frame_index,
+                disease_detected,
+                tree_event=tree_event,
+                explicit_tree_indices=explicit_tree_indices,
+            )
 
             # 转换方向字符为协议码
             lat_dir_code = RobotProtocol.LAT_NORTH if lat_direction == 'N' else RobotProtocol.LAT_SOUTH

@@ -1,4 +1,4 @@
-"""GPS 串口后台接收器。"""
+"""电控统一遥测串口后台接收器。"""
 
 import os
 import threading
@@ -12,19 +12,16 @@ except ImportError:
     serial = None
     list_ports = None
 
-from .gps_protocol import (
-    GpsChecksumError,
-    GpsFix,
-    GpsLineBuffer,
-    GpsProtocolError,
-    GpsSnapshot,
-    great_circle_distance_m,
-    parse_gps_sentence,
+from .gps_protocol import great_circle_distance_m
+from .telemetry_protocol import (
+    RobotTelemetry,
+    TelemetrySnapshot,
+    TelemetryStreamBuffer,
 )
 
 
-class GpsSerialReceiver:
-    """后台读取 GPS 串口并维护最新线程安全快照。"""
+class TelemetrySerialReceiver:
+    """持续接收电控遥测，并维护线程安全的最新快照。"""
 
     def __init__(
         self,
@@ -49,7 +46,7 @@ class GpsSerialReceiver:
         self.port = str(port or "").strip()
         self.baudrate = int(baudrate)
         if self.baudrate <= 0:
-            raise ValueError("GPS 串口波特率必须大于 0")
+            raise ValueError("遥测串口波特率必须大于 0")
         self.read_timeout = max(0.01, float(read_timeout))
         self.stale_timeout_ms = max(1, int(float(stale_timeout) * 1000))
         self.reconnect_interval = max(0.01, float(reconnect_interval))
@@ -71,9 +68,10 @@ class GpsSerialReceiver:
             if str(value or "").strip()
         }
         if not self.port and not self.auto_detect:
-            raise ValueError("关闭自动查找时必须配置 GPS 串口")
+            raise ValueError("关闭自动查找时必须配置遥测串口")
         if serial_factory is None and serial is None:
-            raise RuntimeError("GPS 串口接收需要安装 pyserial>=3.5")
+            raise RuntimeError("遥测串口接收需要安装 pyserial>=3.5")
+
         self.serial_factory = serial_factory or serial.Serial
         if port_provider is not None:
             self.port_provider = port_provider
@@ -89,12 +87,14 @@ class GpsSerialReceiver:
         self._serial = None
         self._active_port = None
         self._has_connected_once = False
-        self._latest_fix: Optional[GpsFix] = None
-        self._speed_anchor_fix: Optional[GpsFix] = None
-        self._latest_speed_mps: Optional[float] = None
+        self._latest_telemetry: Optional[RobotTelemetry] = None
+        self._speed_anchor: Optional[RobotTelemetry] = None
+        self._latest_estimated_speed_mps: Optional[float] = None
         self._last_error_log_at = 0.0
         self._stats = {
             "valid_packets": 0,
+            "discarded_bytes": 0,
+            "length_errors": 0,
             "protocol_errors": 0,
             "checksum_errors": 0,
             "buffer_overflows": 0,
@@ -103,6 +103,8 @@ class GpsSerialReceiver:
             "reconnects": 0,
             "scan_cycles": 0,
             "probe_failures": 0,
+            "duplicate_packets": 0,
+            "sequence_gaps": 0,
             "speed_samples": 0,
             "speed_rejections": 0,
         }
@@ -123,13 +125,13 @@ class GpsSerialReceiver:
         self._stop_event.clear()
         self._thread = threading.Thread(
             target=self._run,
-            name="gps-serial-receiver",
+            name="telemetry-serial-receiver",
             daemon=True,
         )
         self._thread.start()
 
     def stop(self, join_timeout: float = 2.0):
-        """停止接收并关闭串口，允许后续再次启动。"""
+        """停止接收并关闭串口。"""
         self._stop_event.set()
         self._close_serial()
         thread = self._thread
@@ -137,25 +139,23 @@ class GpsSerialReceiver:
             thread.join(timeout=max(0.1, float(join_timeout)))
         self._thread = None
 
-    def get_snapshot(self, now_ms: Optional[int] = None) -> GpsSnapshot:
-        """返回最新 GPS 的不可变快照。"""
+    def get_snapshot(self, now_ms: Optional[int] = None) -> TelemetrySnapshot:
+        """返回最新遥测的不可变快照。"""
         with self._lock:
-            latest = self._latest_fix
-            speed_mps = self._latest_speed_mps
+            latest = self._latest_telemetry
+            estimated_speed = self._latest_estimated_speed_mps
         if latest is None:
-            return GpsSnapshot.empty()
+            return TelemetrySnapshot.empty()
 
         current_ms = int(self.clock_ms() if now_ms is None else now_ms)
         age_ms = max(0, current_ms - latest.received_at_ms)
         stale = age_ms > self.stale_timeout_ms
-        return GpsSnapshot(
-            fix=latest,
+        return TelemetrySnapshot(
+            telemetry=latest,
             age_ms=age_ms,
             stale=stale,
-            valid=latest.position_valid and not stale,
-            speed_mps=(
-                speed_mps if latest.position_valid and not stale else None
-            ),
+            valid=not stale,
+            estimated_speed_mps=None if stale else estimated_speed,
         )
 
     def get_stats(self) -> dict:
@@ -186,7 +186,9 @@ class GpsSerialReceiver:
                         self._increment_stat("probe_failures")
                 except Exception as exc:
                     if not self._stop_event.is_set():
-                        stat_name = "connect_failures" if self._serial is None else "read_failures"
+                        stat_name = (
+                            "connect_failures" if self._serial is None else "read_failures"
+                        )
                         self._increment_stat(stat_name)
                         self._log_error_limited(self._format_serial_error(candidate, exc))
                 finally:
@@ -212,7 +214,6 @@ class GpsSerialReceiver:
         candidates = []
         if self.port and self.port.upper() != "AUTO":
             candidates.append(self.port)
-
         if self.auto_detect:
             try:
                 discovered = self.port_provider() or []
@@ -235,8 +236,8 @@ class GpsSerialReceiver:
         return result
 
     def _read_loop(self, connection, port: str, require_valid_packet: bool):
-        line_buffer = GpsLineBuffer(self.max_buffer_bytes)
-        previous_overflows = 0
+        stream_buffer = TelemetryStreamBuffer(self.max_buffer_bytes)
+        previous_buffer_stats = dict(stream_buffer.stats)
         detected = not require_valid_packet
         probe_deadline = time.monotonic() + self.probe_timeout
         if detected:
@@ -246,14 +247,13 @@ class GpsSerialReceiver:
             waiting = int(getattr(connection, "in_waiting", 0) or 0)
             chunk = connection.read(max(1, min(waiting, 512)))
             if chunk:
-                lines = line_buffer.feed(chunk)
-                if line_buffer.overflow_count > previous_overflows:
-                    difference = line_buffer.overflow_count - previous_overflows
-                    self._increment_stat("buffer_overflows", difference)
-                    previous_overflows = line_buffer.overflow_count
-
-                for line in lines:
-                    if self._handle_line(line) and not detected:
+                received_at_ms = self.clock_ms()
+                packets = stream_buffer.feed(chunk, received_at_ms=received_at_ms)
+                self._sync_buffer_stats(stream_buffer.stats, previous_buffer_stats)
+                previous_buffer_stats = dict(stream_buffer.stats)
+                for telemetry in packets:
+                    self._handle_telemetry(telemetry)
+                    if not detected:
                         detected = True
                         self._activate_port(port)
 
@@ -261,71 +261,75 @@ class GpsSerialReceiver:
                 return False
         return detected
 
-    def _handle_line(self, line: bytes):
-        try:
-            fix = parse_gps_sentence(line, received_at_ms=self.clock_ms())
-        except GpsChecksumError as exc:
-            self._increment_stat("checksum_errors")
-            self._log_error_limited(f"GPS 校验失败: {exc}")
-            return False
-        except GpsProtocolError as exc:
-            self._increment_stat("protocol_errors")
-            self._log_error_limited(f"GPS 报文无效: {exc}")
-            return False
-
+    def _handle_telemetry(self, telemetry: RobotTelemetry):
         with self._lock:
-            self._update_speed_locked(fix)
-            self._latest_fix = fix
+            previous = self._latest_telemetry
+            if previous is not None:
+                delta = (telemetry.sequence - previous.sequence) & 0xFFFF
+                if delta == 0:
+                    self._stats["duplicate_packets"] += 1
+                    return
+                elif delta > 1:
+                    self._stats["sequence_gaps"] += delta - 1
+            self._update_estimated_speed_locked(telemetry)
+            self._latest_telemetry = telemetry
             self._stats["valid_packets"] += 1
-        return True
 
-    def _update_speed_locked(self, fix: GpsFix):
-        if not fix.position_valid:
-            self._speed_anchor_fix = None
-            self._latest_speed_mps = None
+    def _update_estimated_speed_locked(self, telemetry: RobotTelemetry):
+        if not telemetry.gps_valid:
+            self._speed_anchor = None
+            self._latest_estimated_speed_mps = None
             return
-
-        previous = self._speed_anchor_fix
+        previous = self._speed_anchor
         if previous is None:
-            self._speed_anchor_fix = fix
+            self._speed_anchor = telemetry
             return
 
-        elapsed_s = (fix.received_at_ms - previous.received_at_ms) / 1000.0
+        elapsed_s = (telemetry.received_at_ms - previous.received_at_ms) / 1000.0
         if elapsed_s <= 0:
             self._stats["speed_rejections"] += 1
             return
         if elapsed_s < self.speed_min_interval:
             return
-
         if elapsed_s > self.speed_max_interval:
-            self._speed_anchor_fix = fix
-            self._latest_speed_mps = None
+            self._speed_anchor = telemetry
+            self._latest_estimated_speed_mps = None
             self._stats["speed_rejections"] += 1
             return
 
         distance_m = great_circle_distance_m(
             previous.latitude,
             previous.longitude,
-            fix.latitude,
-            fix.longitude,
+            telemetry.latitude,
+            telemetry.longitude,
         )
-        raw_speed_mps = (
-            0.0 if distance_m < self.speed_min_distance else distance_m / elapsed_s
-        )
-        self._speed_anchor_fix = fix
-        if raw_speed_mps > self.speed_max_mps:
-            self._latest_speed_mps = None
+        raw_speed = 0.0 if distance_m < self.speed_min_distance else distance_m / elapsed_s
+        self._speed_anchor = telemetry
+        if raw_speed > self.speed_max_mps:
+            self._latest_estimated_speed_mps = None
             self._stats["speed_rejections"] += 1
             return
 
-        if self._latest_speed_mps is None:
-            self._latest_speed_mps = raw_speed_mps
+        if self._latest_estimated_speed_mps is None:
+            self._latest_estimated_speed_mps = raw_speed
         else:
             alpha = self.speed_smoothing_alpha
-            self._latest_speed_mps = (
-                alpha * raw_speed_mps + (1.0 - alpha) * self._latest_speed_mps
+            self._latest_estimated_speed_mps = (
+                alpha * raw_speed
+                + (1.0 - alpha) * self._latest_estimated_speed_mps
             )
         self._stats["speed_samples"] += 1
+
+    def _sync_buffer_stats(self, current, previous):
+        with self._lock:
+            for name in (
+                "discarded_bytes",
+                "length_errors",
+                "protocol_errors",
+                "checksum_errors",
+                "buffer_overflows",
+            ):
+                self._stats[name] += current[name] - previous[name]
 
     def _activate_port(self, port: str):
         with self._lock:
@@ -333,7 +337,7 @@ class GpsSerialReceiver:
                 self._stats["reconnects"] += 1
             self._has_connected_once = True
             self._active_port = port
-        print(f"[GPS] 已识别串口: {port} @ {self.baudrate}")
+        print(f"[遥测] 已识别串口: {port} @ {self.baudrate}")
 
     def _close_serial(self):
         connection = self._serial
@@ -353,7 +357,7 @@ class GpsSerialReceiver:
     def _log_error_limited(self, message: str):
         now = time.monotonic()
         if now - self._last_error_log_at >= 5.0:
-            print(f"[GPS] {message}")
+            print(f"[遥测] {message}")
             self._last_error_log_at = now
 
     @staticmethod

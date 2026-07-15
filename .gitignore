@@ -52,6 +52,7 @@ data/images/*.png
 # Logs
 *.log
 wandb/
+/detect.pid
 
 # OS
 .DS_Store
@@ -66,8 +67,13 @@ desktop.ini
 # Config overrides
 config/ip.json
 config/*.local.json
+.env
+.env.*
+!.env.example
 
 # Documents
 *.docx
 *.doc
 *.pdf
+/docs/soft_copyright/
+/docs/private/

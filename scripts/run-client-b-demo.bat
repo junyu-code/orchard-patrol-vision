@@ -34,7 +34,7 @@ echo ============================================================
 echo.
 
 pushd "%PROJECT_DIR%" >nul
-"%PYTHON_PATH%" "%PROJECT_DIR%\main.py" --preset client_b --source "%VIDEO_FILE%" --auto-start
+"%PYTHON_PATH%" "%PROJECT_DIR%\main.py" --preset client_b --data-mode simulation --source "%VIDEO_FILE%" --auto-start
 popd >nul
 
 endlocal

@@ -15,6 +15,10 @@
 - 甲方 A HTTP 数据上报
 - 甲方 B UDP 二进制协议上报
 - 甲方 B 本地演示视频正放/倒放循环推流
+- 58 字节电控统一遥测串口接收与 CRC16 校验
+- `real`、`debug`、`simulation` 三种数据来源模式，默认 `debug`
+- GPS 速度缺失时的连续坐标估算、异常过滤和平滑
+- 实时遥测 UI、原始画面录像和程序窗口录像
 - 果树 ID、GPS、速度、方向、电池等巡检数据模拟
 - 双甲方预设配置快速切换
 
@@ -30,6 +34,10 @@ orchard-patrol-vision/
 ├─ transport/
 │  ├─ http_sender.py               # 甲方 A HTTP 上报
 │  ├─ udp_sender.py                # 甲方 B UDP 发送
+│  ├─ telemetry_protocol.py        # 58 字节电控统一遥测协议
+│  ├─ telemetry_serial_receiver.py # 统一遥测串口接收与重连
+│  ├─ data_mode.py                 # 真实/调试/仿真数据策略
+│  ├─ gps_serial_receiver.py       # 旧 OPGPS 串口兼容接收
 │  ├─ robot_protocol.py            # 甲方 B UDP 数据包协议
 │  ├─ patrol_timeline.py           # 甲方 B 巡检果树时间轴
 │  ├─ virtual_sensor.py            # GPS、速度、方向、电池等虚拟传感器
@@ -41,13 +49,32 @@ orchard-patrol-vision/
 ├─ tools/                           # 调试、诊断、辅助脚本
 ├─ docs/                            # 对接说明、流程图、结构说明
 ├─ pt/                              # 模型权重目录
-├─ main_win/                        # 主界面 UI 文件
+├─ main_win/                        # 主界面、实时数据格式化和录像模块
 └─ dialog/                          # RTSP 输入弹窗
 ```
 
 更多结构说明见 `docs/PROJECT_STRUCTURE.md`。
 
 ## 快速运行
+
+### 数据来源模式
+
+```bash
+python main.py --data-mode real        # 只用真实数据，缺失保持为空
+python main.py --data-mode debug       # 真实优先，缺失使用虚拟值（默认）
+python main.py --data-mode simulation  # 完全使用虚拟遥测
+```
+
+启用电控统一遥测：
+
+```bash
+python main.py --data-mode real \
+  --enable-telemetry-serial \
+  --telemetry-port /dev/ttyTELEMETRY_IN \
+  --no-telemetry-auto-detect
+```
+
+Windows 端口示例为 `COM13`。详细规则见 `docs/DATA_MODES.md`，界面字段见 `docs/UI_FUNCTIONS.md`。
 
 ### 1. 安装依赖
 
@@ -103,11 +130,11 @@ python main.py --preset both
 
 配置含义：
 
-| 配置 | 说明 |
-| --- | --- |
-| `client_a` | 仅对接甲方 A：HTTP + RTMP |
-| `client_b` | 仅对接甲方 B：UDP + RTMP |
-| `both` | 同时开启 HTTP、UDP、RTMP，主要用于联调测试 |
+| 配置         | 说明                                       |
+| ------------ | ------------------------------------------ |
+| `client_a` | 仅对接甲方 A：HTTP + RTMP                  |
+| `client_b` | 仅对接甲方 B：UDP + RTMP                   |
+| `both`     | 同时开启 HTTP、UDP、RTMP，主要用于联调测试 |
 
 ## 甲方 B 推流与 UDP
 
@@ -160,7 +187,15 @@ python tools/robot_udp_simulator.py
 
 # 测试 RTMP 推流连通性
 python tools/rtmp_probe.py
+
+# 58 字节统一遥测内存回环
+python tools/serial_self_test.py telemetry-loopback
+
+# 监听真实电控遥测串口
+python tools/serial_self_test.py telemetry --port /dev/ttyTELEMETRY_IN --duration 10
 ```
+
+Linux 部署可使用 `detect.sh`、`deploy/orchard-patrol-vision.desktop` 或 `deploy/yolo-detect.service`。这些文件只由 Linux 手动安装或调用，Windows 启动路径不会执行 systemd 或桌面自启动配置。
 
 ## 注意事项
 

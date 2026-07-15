@@ -7,6 +7,7 @@ from transport.gps_protocol import (
     GpsProtocolError,
     GpsSnapshot,
     calculate_checksum,
+    great_circle_distance_m,
     parse_gps_sentence,
     select_frame_gps_dms,
 )
@@ -62,6 +63,10 @@ class GpsProtocolTests(unittest.TestCase):
             received_at_ms=1000,
         )
         self.assertFalse(fix.position_valid)
+
+    def test_great_circle_distance_uses_decimal_degree_positions(self):
+        distance = great_circle_distance_m(25.0, 110.0, 25.000009, 110.0)
+        self.assertAlmostEqual(distance, 1.0, delta=0.02)
 
     def test_stream_buffer_handles_split_and_sticky_packets(self):
         buffer = GpsLineBuffer()
