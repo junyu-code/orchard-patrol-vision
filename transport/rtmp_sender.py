@@ -1,5 +1,8 @@
 import subprocess
 
+from .time_standard import normalize_time_standard
+from .video_timestamp import add_timestamp
+
 
 def _display_rtmp_url(url):
     """隐藏 RTMP 查询参数，避免签名进入控制台和日志。"""
@@ -17,12 +20,16 @@ class RtmpSender:
         maxrate="900k",
         bufsize="1400k",
         preset="veryfast",
+        overlay_timestamp=False,
+        time_standard="utc+8",
     ):
         self.rtmp_url = rtmp_url
         self.video_bitrate = video_bitrate
         self.maxrate = maxrate
         self.bufsize = bufsize
         self.preset = preset
+        self.overlay_timestamp = bool(overlay_timestamp)
+        self.time_standard = normalize_time_standard(time_standard)
         self.process = None
         self.is_running = False
         
@@ -112,8 +119,13 @@ class RtmpSender:
             return False
         
         try:
-            # 将图像数据写入FFmpeg的stdin
-            self.process.stdin.write(frame.tobytes())
+            # 时间水印只写入远端视频帧，不污染本地预览和原始录像。
+            stream_frame = (
+                add_timestamp(frame, time_standard=self.time_standard)
+                if self.overlay_timestamp
+                else frame
+            )
+            self.process.stdin.write(stream_frame.tobytes())
             return True
         except BrokenPipeError:
             print("RTMP连接断开 (BrokenPipe)")

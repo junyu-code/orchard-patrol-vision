@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import Mock
 
 from transport.udp_sender import UdpSender
 
@@ -9,6 +10,7 @@ class UdpSenderTreeDataTests(unittest.TestCase):
             udp_host="127.0.0.1",
             udp_port=9,
             simulate_tree_events=True,
+            sock=Mock(),
         )
 
     def tearDown(self):

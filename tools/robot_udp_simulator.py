@@ -7,7 +7,7 @@ import socket
 import time
 import random
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
@@ -15,6 +15,8 @@ if str(PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(PROJECT_DIR))
 
 from transport.robot_protocol import RobotProtocol
+
+BEIJING_TIME = timezone(timedelta(hours=8), name="UTC+8")
 
 # Windows 控制台默认可能是 GBK，统一改成 UTF-8，避免中文/符号输出报错
 if hasattr(sys.stdout, "reconfigure"):
@@ -28,7 +30,7 @@ class RobotSimulator:
         self,
         robot_id: int = 1,
         robot_status: int = 1,
-        server_host='1.15.149.164',
+        server_host='1.14.205.24',
         server_port=4926,
         tree_interval_frames: int = 8,
         tree_interval_jitter: int = 2,
@@ -187,7 +189,7 @@ class RobotSimulator:
     def send_data(self):
         """发送数据包（适配新28字节协议）"""
         # 获取当前时间
-        now = datetime.now()
+        now = datetime.now(BEIJING_TIME)
         hour = now.hour
         minute = now.minute
         second = now.second
@@ -245,7 +247,7 @@ class RobotSimulator:
         move_status = "📸拍照" if self.is_near_tree else "🚶移动"
         tree_info = f"左#{self.left_tree_index:3d} 右#{self.right_tree_index:3d}" if self.is_near_tree else "无树      "
         
-        print(f"[{now.strftime('%H:%M:%S')}] {status_text} | 帧#{self.frame_index:5d} | "
+        print(f"[UTC+8 {now.strftime('%H:%M:%S')}] {status_text} | 帧#{self.frame_index:5d} | "
               f"{move_status} | {tree_info} | "
               f"速度{self.velocity*0.1:.1f}m/s | "
               f"方位{self.azimuth:3d}° | "
@@ -323,7 +325,7 @@ def main():
     # [robot_id] [robot_status] [server_host] [server_port] [duration] [interval] [tree_interval] [tree_jitter]
     robot_id = 1
     robot_status = 1  # 默认巡检状态
-    server_host = '1.15.149.164'
+    server_host = '1.14.205.24'
     server_port = 4926
     duration = None
     interval = 1.0

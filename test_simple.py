@@ -16,7 +16,7 @@ print("=" * 50)
 
 # 测试1: UDP
 print("\n[UDP 测试]")
-UDP_HOST = "1.15.149.164"
+UDP_HOST = "1.14.205.24"
 UDP_PORT = 4926
 
 try:
@@ -30,7 +30,7 @@ except Exception as e:
 
 # 测试2: RTMP (TCP)
 print("\n[RTMP 测试]")
-RTMP_HOST = "www.xsjny.com"
+RTMP_HOST = "gl.xsjny.com"
 RTMP_PORT = 1935
 
 try:

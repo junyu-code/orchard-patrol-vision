@@ -27,13 +27,20 @@ from transport.data_mode import (
     missing_udp_telemetry_fields,
     select_gps_dms,
 )
+from transport.stream_resolution import (
+    COMMON_STREAM_RESOLUTIONS,
+    normalize_resolution_key,
+    resize_frame_for_stream,
+    resolution_label,
+    resolve_stream_size,
+)
 
 CONFIG = build_config()
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QFileDialog, QMenu, QAction, QListWidgetItem,
     QLabel, QVBoxLayout, QWidget, QSizePolicy, QStyleFactory, QGridLayout,
-    QFrame, QHBoxLayout, QPushButton, QScrollArea,
+    QFrame, QHBoxLayout, QPushButton, QScrollArea, QComboBox,
 )
 from PyQt5.QtCore import Qt, QPoint, QTimer, QThread, pyqtSignal, QCoreApplication
 from PyQt5.QtGui import QImage, QPixmap, QIcon, QFont
@@ -452,6 +459,8 @@ class DetThread(QThread):
                     video_bitrate=self.cfg.get("RTMP_VIDEO_BITRATE", "1200k"),
                     maxrate=self.cfg.get("RTMP_MAXRATE", "1500k"),
                     bufsize=self.cfg.get("RTMP_BUFSIZE", "2400k"),
+                    overlay_timestamp=self.cfg.get("RTMP_TIMESTAMP_OVERLAY", False),
+                    time_standard=self.cfg.get("RTMP_TIME_STANDARD", "local"),
                 )
             else:
                 print("⚠️ RTMP URL 为空，跳过初始化")
@@ -483,6 +492,7 @@ class DetThread(QThread):
                         tree_interval=self.cfg.get("TREE_INTERVAL", 8),
                         tree_jitter=self.cfg.get("TREE_JITTER", 2),
                         tree_hold_frames=self.cfg.get("TREE_HOLD_FRAMES", 5),
+                        time_standard=self.cfg.get("UDP_TIME_STANDARD", "local"),
                     )
                     print(f"✅ UDP 发送器已初始化: {self.cfg['UDP_HOST']}:{self.cfg['UDP_PORT']}")
                     print(f"   Robot ID: {self.cfg.get('ROBOT_ID', 1)}")
@@ -757,16 +767,12 @@ class DetThread(QThread):
                 if self.cfg["ENABLE_RTMP"] and self.rtmp_sender and not rtmp_initialized:
                     h, w = im0s.shape[:2] # <--- 这里获取的是摄像头原始画面的高和宽
                     
-                    max_push_width = int(self.cfg.get("RTMP_MAX_WIDTH", 1280))
-                    if w > max_push_width:
-                        ratio = max_push_width / w
-                        push_w = max_push_width
-                        push_h = int(h * ratio)
-                        # 确保宽高是偶数（编码器要求）
-                        push_w = push_w - (push_w % 2)
-                        push_h = push_h - (push_h % 2)
-                    else:
-                        push_w, push_h = w, h
+                    push_w, push_h = resolve_stream_size(
+                        w,
+                        h,
+                        resolution=self.cfg.get("RTMP_RESOLUTION"),
+                        legacy_max_width=self.cfg.get("RTMP_MAX_WIDTH", 1280),
+                    )
                     
                     fps = 25
                     if self.vid_cap:
@@ -1202,11 +1208,7 @@ class DetThread(QThread):
 
                 # RTMP推流
                 if self.cfg["ENABLE_RTMP"] and self.rtmp_sender and rtmp_initialized:
-                    # 如果推流分辨率与当前画面不一致，需要缩放
-                    if im0s.shape[1] != push_w or im0s.shape[0] != push_h:
-                        frame_to_push = cv2.resize(im0s, (push_w, push_h))
-                    else:
-                        frame_to_push = im0s
+                    frame_to_push = resize_frame_for_stream(im0s, push_w, push_h)
                     self.rtmp_sender.send_frame(frame_to_push)
 
                 if self.rate_check:
@@ -1566,6 +1568,7 @@ QFrame[role="divider"] {
             self.set_realtime_source(key, "unavailable")
 
         self.verticalLayout_7.insertWidget(2, self.dataPanel)
+        self.setup_stream_resolution_control()
         # 实时遥测优先显示，阈值等低频设置放在其后，需要时可向下滚动。
         self.verticalLayout_8.removeItem(self.verticalLayout_7)
         self.verticalLayout_8.insertLayout(3, self.verticalLayout_7)
@@ -1582,6 +1585,58 @@ QListWidget{
 }
 """)
         self.set_detection_orientation(Qt.Horizontal)
+
+    def setup_stream_resolution_control(self):
+        resolution_layout = QHBoxLayout()
+        resolution_layout.setSpacing(8)
+        resolution_layout.setContentsMargins(0, 0, 7, 0)
+
+        resolution_label_widget = QLabel("推流分辨率", self.groupBox_8)
+        resolution_label_widget.setMinimumWidth(92)
+        resolution_label_widget.setMaximumWidth(92)
+        resolution_label_widget.setStyleSheet("""
+QLabel {
+    color: rgb(218, 218, 218);
+    font: bold 16px "Microsoft YaHei";
+}
+""")
+        resolution_layout.addWidget(resolution_label_widget)
+
+        self.streamResolutionCombo = QComboBox(self.groupBox_8)
+        self.streamResolutionCombo.setObjectName("streamResolutionCombo")
+        self.streamResolutionCombo.setMinimumHeight(35)
+        self.streamResolutionCombo.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Fixed,
+        )
+        self.streamResolutionCombo.setStyleSheet(self.comboBox.styleSheet())
+        self.streamResolutionCombo.setToolTip("RTMP 输出尺寸；画面保持原比例")
+        for key, label, _width, _height in COMMON_STREAM_RESOLUTIONS:
+            self.streamResolutionCombo.addItem(label, key)
+
+        configured_resolution = self.cfg.get("RTMP_RESOLUTION", "source")
+        try:
+            configured_resolution = normalize_resolution_key(configured_resolution)
+        except ValueError:
+            configured_resolution = "source"
+            self.cfg["RTMP_RESOLUTION"] = configured_resolution
+        selected_index = self.streamResolutionCombo.findData(configured_resolution)
+        self.streamResolutionCombo.setCurrentIndex(max(0, selected_index))
+        self.streamResolutionCombo.currentIndexChanged.connect(
+            self.change_stream_resolution
+        )
+        resolution_layout.addWidget(self.streamResolutionCombo, 1)
+
+        # 放在模型选择之后；遥测面板随后会被提升到它的下方。
+        self.verticalLayout_8.insertLayout(2, resolution_layout)
+
+    def change_stream_resolution(self, _index):
+        resolution = self.streamResolutionCombo.currentData()
+        if not resolution:
+            return
+        resolution = normalize_resolution_key(resolution)
+        self.cfg["RTMP_RESOLUTION"] = resolution
+        self.statistic_msg(f"推流分辨率：{resolution_label(resolution)}")
 
     def setup_recording_controls(self):
         self.recordButton = QPushButton("●", self.groupBox_5)
@@ -1728,6 +1783,7 @@ QPushButton#recordButton[recording="true"] {
         self.show_image(frame, self.raw_video)
 
     def handle_detection_finished(self):
+        self.streamResolutionCombo.setEnabled(True)
         if self.recording_mode != "camera":
             return
         output_path = self.stop_recording(show_message=False)
@@ -1826,6 +1882,7 @@ QPushButton:pressed {
         self.det_thread.jump_out = False
         self.det_thread.is_continue = True
         if not self.det_thread.isRunning():
+            self.streamResolutionCombo.setEnabled(False)
             self.det_thread.start()
         self.statistic_msg('运行中')
 

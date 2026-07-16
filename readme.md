@@ -138,10 +138,14 @@ python main.py --preset both
 
 ## 甲方 B 推流与 UDP
 
-甲方 B 当前默认配置：
+甲方 B 当前测试服务器配置：
 
-- RTMP：`rtmp://www.xsjny.com/live/robot1_sensor1`
-- UDP：`1.15.149.164:4926`
+- 管理平台：`https://gl.xsjny.com/web/robot-analysis-ui/#/analytics`
+- 大屏：`https://gl.xsjny.com/web/robot-data-view/index.html`
+- 左路 RTMP：`rtmp://gl.xsjny.com/live/robot1_sensor1`
+- 右路 RTMP：`rtmp://gl.xsjny.com/live/robot1_sensor2`（`client_b` 当前默认）
+- UDP：`1.14.205.24:4926`
+- 视频：最大 `1280` 宽、`30fps`、`3000k`，远端画面叠加 ISO-8601 北京时间（`UTC+8`）
 - UDP 数据包：28 字节二进制协议，包头 `0x66`，包尾 `0x99`
 
 UDP 上报内容包括：
@@ -150,7 +154,7 @@ UDP 上报内容包括：
 - 机器人状态
 - 帧号
 - 左/右果树 ID
-- 时间
+- 北京时间（`UTC+8`，协议原有 `HH:MM:SS` 三字节，不扩展包长）
 - GPS
 - 方向角
 - 速度

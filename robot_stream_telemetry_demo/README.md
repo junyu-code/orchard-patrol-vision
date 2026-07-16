@@ -41,11 +41,12 @@ python run_robot_stream_demo.py
 默认参数：
 
 - 视频源：`media/patrol_demo.mp4`
-- RTMP：`rtmp://www.xsjny.com/live/robot1_sensor1`
-- UDP：`1.15.149.164:4926`
+- RTMP：`rtmp://gl.xsjny.com/live/robot1_sensor2`（右路；左路为 `sensor1`）
+- UDP：`1.14.205.24:4926`
 - UDP 格式：`orchard1|` + 28 字节机器人遥测包
 - GPS 起点：`25.28, 110.34`
-- 推流参数：`480宽 / 10fps / 400k`
+- 推流参数：`1280宽 / 30fps / 3000k`
+- 时间：视频叠加完整北京时间（`UTC+8`）水印，UDP 原有时间字段发送北京时间 `HH:MM:SS`
 
 ## 指定接收地址
 
@@ -64,14 +65,14 @@ python run_robot_stream_demo.py --no-orchard-prefix
 ```powershell
 python run_robot_stream_demo.py `
   --source media/patrol_demo.mp4 `
-  --rtmp-url rtmp://www.xsjny.com/live/robot1_sensor1 `
-  --udp-host 1.15.149.164 `
+  --rtmp-url rtmp://gl.xsjny.com/live/robot1_sensor2 `
+  --udp-host 1.14.205.24 `
   --udp-port 4926 `
   --latitude 25.28 `
   --longitude 110.34 `
-  --max-width 480 `
-  --fps 10 `
-  --bitrate 400k
+  --max-width 1280 `
+  --fps 30 `
+  --bitrate 3000k
 ```
 
 ## UDP 数据格式

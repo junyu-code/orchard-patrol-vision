@@ -5,7 +5,8 @@
     "password": "CLIENT_A_PASSWORD"
   },
   "client_b": {
-    "platform_url": "https://www.xsjny.com/web/robot-analysis-ui/index.html",
+    "platform_url": "https://gl.xsjny.com/web/robot-analysis-ui/#/analytics",
+    "data_view_url": "https://gl.xsjny.com/web/robot-data-view/index.html",
     "username": "CLIENT_B_USERNAME",
     "password": "CLIENT_B_PASSWORD"
   }

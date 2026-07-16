@@ -15,11 +15,12 @@ import socket
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 cv2 = None
 np = None
+BEIJING_TIME = timezone(timedelta(hours=8), name="UTC+8")
 
 
 def load_runtime_dependencies():
@@ -37,6 +38,43 @@ def load_runtime_dependencies():
         ) from exc
     cv2 = cv2_module
     np = np_module
+
+
+def add_beijing_timestamp(frame):
+    """叠加完整北京时间，只修改发送到 RTMP 的帧副本。"""
+    output = frame.copy()
+    timestamp = datetime.now(BEIJING_TIME).isoformat(timespec="milliseconds")
+    label = "UTC+8 " + timestamp
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = min(0.7, max(0.32, output.shape[1] / 1280.0 * 0.7))
+    padding = max(4, min(10, output.shape[1] // 100))
+    text_size, _ = cv2.getTextSize(label, font, font_scale, 1)
+    available_width = max(1, output.shape[1] - 2 * padding)
+    if text_size[0] > available_width:
+        font_scale *= available_width / text_size[0]
+    (text_width, text_height), baseline = cv2.getTextSize(label, font, font_scale, 1)
+    y = min(output.shape[0] - padding, padding + text_height)
+    cv2.rectangle(
+        output,
+        (max(0, padding // 2), max(0, y - text_height - padding // 2)),
+        (
+            min(output.shape[1] - 1, padding + text_width + padding // 2),
+            min(output.shape[0] - 1, y + baseline + padding // 2),
+        ),
+        (0, 0, 0),
+        -1,
+    )
+    cv2.putText(
+        output,
+        label,
+        (padding, y),
+        font,
+        font_scale,
+        (255, 255, 255),
+        1,
+        cv2.LINE_AA,
+    )
+    return output
 
 
 class RobotProtocol:
@@ -206,7 +244,7 @@ class RtmpSender:
         if not self.is_running or self.process is None or self.process.stdin is None:
             return False
         try:
-            self.process.stdin.write(frame.tobytes())
+            self.process.stdin.write(add_beijing_timestamp(frame).tobytes())
             return True
         except BrokenPipeError:
             print("RTMP 推流断开: BrokenPipe")
@@ -353,7 +391,7 @@ class UdpSender:
         self.right_tree_code = 0
 
     def send(self, frame_index, sensor, tree_event=None):
-        now = datetime.now()
+        now = datetime.now(BEIJING_TIME)
         if tree_event:
             self.left_tree_code = int(tree_event["left_tree_code"])
             self.right_tree_code = int(tree_event["right_tree_code"])
@@ -397,6 +435,7 @@ class UdpSender:
         self.sock.sendto(packet, (self.host, self.port))
         return {
             "length": len(packet),
+            "beijing_time": now.strftime("%H:%M:%S"),
             "robot_status": robot_status,
             "left_tree_code": self.left_tree_code,
             "right_tree_code": self.right_tree_code,
@@ -514,19 +553,19 @@ def resolve_source_path(source):
 def parse_args():
     parser = argparse.ArgumentParser(description="视频流与机器人遥测独立联调程序")
     parser.add_argument("--source", default="media/patrol_demo.mp4", help="视频源：摄像头编号、视频文件、RTSP/RTMP/HTTP 地址")
-    parser.add_argument("--rtmp-url", default="rtmp://www.xsjny.com/live/robot1_sensor1", help="RTMP 推流地址")
-    parser.add_argument("--udp-host", default="1.15.149.164", help="UDP 接收地址")
+    parser.add_argument("--rtmp-url", default="rtmp://gl.xsjny.com/live/robot1_sensor2", help="RTMP 推流地址")
+    parser.add_argument("--udp-host", default="1.14.205.24", help="UDP 接收地址")
     parser.add_argument("--udp-port", type=int, default=4926, help="UDP 接收端口")
     parser.add_argument("--orchard-code", default="orchard1", help="果园编号前缀")
     parser.add_argument("--no-orchard-prefix", action="store_true", help="只发送裸 28 字节 UDP 包")
     parser.add_argument("--robot-id", type=int, default=1, help="机器人编号")
     parser.add_argument("--latitude", type=float, default=25.28, help="模拟 GPS 纬度")
     parser.add_argument("--longitude", type=float, default=110.34, help="模拟 GPS 经度")
-    parser.add_argument("--max-width", type=int, default=480, help="RTMP 最大推流宽度")
-    parser.add_argument("--fps", type=int, default=10, help="RTMP 推流帧率")
-    parser.add_argument("--bitrate", default="400k", help="RTMP 视频码率")
-    parser.add_argument("--maxrate", default="550k", help="RTMP 峰值码率")
-    parser.add_argument("--bufsize", default="800k", help="RTMP 编码缓冲区")
+    parser.add_argument("--max-width", type=int, default=1280, help="RTMP 最大推流宽度")
+    parser.add_argument("--fps", type=int, default=30, help="RTMP 推流帧率")
+    parser.add_argument("--bitrate", default="3000k", help="RTMP 视频码率")
+    parser.add_argument("--maxrate", default="3600k", help="RTMP 峰值码率")
+    parser.add_argument("--bufsize", default="6000k", help="RTMP 编码缓冲区")
     parser.add_argument("--udp-interval", type=float, default=1.0, help="UDP 心跳间隔，单位秒")
     parser.add_argument("--tree-times", default="1,5,9,13,17,22,27,31,35,39", help="果树事件触发秒点，逗号分隔；空字符串表示不触发")
     parser.add_argument("--start-tree-code", type=int, default=1, help="起始果树编号")
@@ -606,7 +645,11 @@ def main():
 
             frame_index += 1
             if frame.shape[1] != push_width or frame.shape[0] != push_height:
-                push_frame = cv2.resize(frame, (push_width, push_height))
+                push_frame = cv2.resize(
+                    frame,
+                    (push_width, push_height),
+                    interpolation=cv2.INTER_AREA,
+                )
             else:
                 push_frame = frame
             push_frame = np.ascontiguousarray(push_frame)
@@ -623,7 +666,8 @@ def main():
                 summary = udp_sender.send(frame_index, sensor, tree_event=tree_event)
                 last_udp_time = now
                 print(
-                    f"UDP 已发送 | frame={frame_index} | status={summary['robot_status']} | "
+                    f"UDP 已发送 | UTC+8={summary['beijing_time']} | frame={frame_index} | "
+                    f"status={summary['robot_status']} | "
                     f"leftTreeCode={summary['left_tree_code']} rightTreeCode={summary['right_tree_code']} | "
                     f"GPS={summary['latitude']:.6f},{summary['longitude']:.6f} | "
                     f"speed={summary['velocity']:.1f}m/s | soc={summary['soc']}% | bytes={summary['length']}"

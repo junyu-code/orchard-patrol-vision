@@ -17,7 +17,7 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_VIDEO = ROOT_DIR / "samples" / "videos" / "robot_push" / "test0_push.mp4"
-DEFAULT_RTMP_URL = "rtmp://www.xsjny.com/live/robot1_sensor1"
+DEFAULT_RTMP_URL = "rtmp://gl.xsjny.com/live/robot1_sensor2"
 LOG_DIR = ROOT_DIR / "logs"
 
 PROFILES = [
@@ -65,6 +65,24 @@ PROFILES = [
         "bitrate": "1800k",
         "maxrate": "2200k",
         "bufsize": "3600k",
+    },
+    {
+        "name": "720p_30fps_3000k",
+        "width": 1280,
+        "height": 720,
+        "fps": 30,
+        "bitrate": "3000k",
+        "maxrate": "3600k",
+        "bufsize": "6000k",
+    },
+    {
+        "name": "1080p_25fps_4500k",
+        "width": 1920,
+        "height": 1080,
+        "fps": 25,
+        "bitrate": "4500k",
+        "maxrate": "5400k",
+        "bufsize": "9000k",
     },
 ]
 

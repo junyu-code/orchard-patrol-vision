@@ -7,8 +7,8 @@ import socket
 import time
 import random
 import sys
-from datetime import datetime
 from .robot_protocol import RobotProtocol
+from .time_standard import current_time, normalize_time_standard, time_standard_label
 
 # Windows 控制台可能默认使用 GBK，统一输出编码避免中文和符号报错
 if hasattr(sys.stdout, "reconfigure"):
@@ -20,7 +20,7 @@ class UdpSender:
     """UDP 数据发送器"""
 
     def __init__(self,
-                 udp_host='1.15.149.164',
+                 udp_host='1.14.205.24',
                  udp_port=4926,
                  robot_id=1,
                  sensor_id=1,
@@ -29,7 +29,10 @@ class UdpSender:
                  simulate_tree_events=False,
                  tree_interval=8,
                  tree_jitter=2,
-                 tree_hold_frames=5):
+                 tree_hold_frames=5,
+                 time_standard='local',
+                 clock=None,
+                 sock=None):
         """
         初始化 UDP 发送器
 
@@ -42,6 +45,9 @@ class UdpSender:
             tree_interval: 模拟果树出现的基础发送间隔
             tree_jitter: 模拟果树出现间隔的允许波动
             tree_hold_frames: 每次检测到果树后保持编号的发送次数
+            time_standard: 时间字段使用 local、utc 或 utc+8；不改变28字节协议长度
+            clock: 可选时钟函数，主要用于测试
+            sock: 可选 UDP socket，便于离线测试；生产环境留空
         """
         self.udp_host = udp_host
         self.udp_port = udp_port
@@ -53,9 +59,15 @@ class UdpSender:
         self.tree_interval = max(1, int(tree_interval))
         self.tree_jitter = max(0, int(tree_jitter))
         self.tree_hold_frames = max(1, int(tree_hold_frames))
+        self.time_standard = normalize_time_standard(time_standard)
+        self.clock = clock
 
         # 创建 UDP socket
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock = (
+            sock
+            if sock is not None
+            else socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        )
 
         # 果树计数（新协议：左右分开）
         self.left_tree_index = 0
@@ -68,6 +80,7 @@ class UdpSender:
         print(f"✅ UDP 发送器已初始化: {udp_host}:{udp_port} | Robot ID: {robot_id}")
         if self.add_orchard_prefix:
             print(f"   UDP中央平台格式: {self.orchard_id}| + 28字节机器人协议包")
+        print(f"   UDP时间基准: {time_standard_label(self.time_standard)} (HH:MM:SS)")
         if self.simulate_tree_events:
             print(
                 f"   果树模拟: 每 {self.tree_interval}±{self.tree_jitter} 次发送出现一组，"
@@ -78,6 +91,9 @@ class UdpSender:
         """计算下一次模拟果树出现的帧号。"""
         jitter = random.randint(-self.tree_jitter, self.tree_jitter)
         return int(frame_index + max(1, self.tree_interval + jitter))
+
+    def _current_time(self):
+        return current_time(self.time_standard, clock=self.clock)
 
     def _update_tree_indices(
         self,
@@ -167,7 +183,7 @@ class UdpSender:
         """
         try:
             # 获取当前时间
-            now = datetime.now()
+            now = self._current_time()
             hour = now.hour
             minute = now.minute
             second = now.second
@@ -234,6 +250,7 @@ class UdpSender:
         return (
             f"状态:{status_text} | "
             f"帧:{data['frame_index']} | "
+            f"{time_standard_label(self.time_standard)}:{data['time']['formatted']} | "
             f"左树:ID{trees['left']:04d} 右树:ID{trees['right']:04d} | "
             f"GPS:{gps['latitude']['decimal']:.6f},{gps['longitude']['decimal']:.6f} | "
             f"方向:{data['azimuth']}° | "
@@ -254,7 +271,12 @@ class UdpSender:
 
 if __name__ == "__main__":
     # 测试代码
-    sender = UdpSender(udp_host='1.15.149.164', udp_port=4926, robot_id=1)
+    sender = UdpSender(
+        udp_host='1.14.205.24',
+        udp_port=4926,
+        robot_id=1,
+        time_standard='utc+8',
+    )
 
     print("开始发送测试数据...")
     for i in range(5):

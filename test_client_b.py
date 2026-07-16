@@ -24,7 +24,7 @@ print("=" * 60)
 print("\n【测试1】UDP 连接测试")
 print("-" * 60)
 
-UDP_HOST = "1.15.149.164"
+UDP_HOST = "1.14.205.24"
 UDP_PORT = 4926
 
 try:
@@ -72,8 +72,8 @@ except Exception as e:
 print("\n【测试2】RTMP 服务器连接测试")
 print("-" * 60)
 
-RTMP_URL = "rtmp://www.xsjny.com/live/robot1_sensor1"
-RTMP_HOST = "www.xsjny.com"
+RTMP_URL = "rtmp://gl.xsjny.com/live/robot1_sensor2"
+RTMP_HOST = "gl.xsjny.com"
 RTMP_PORT = 1935  # RTMP 默认端口
 
 try:
@@ -129,7 +129,8 @@ try:
         udp_host=UDP_HOST,
         udp_port=UDP_PORT,
         robot_id=1,
-        sensor_id=1
+        sensor_id=2,
+        time_standard="utc+8",
     )
 
     print("📤 发送测试数据...")
@@ -234,7 +235,7 @@ if all_ok:
     print("\n下一步：")
     print("1. 运行主程序: python main.py --preset client_b")
     print("2. 访问管理平台验证推流:")
-    print("   https://www.xsjny.com/web/robot-analysis-ui/index.html")
+    print("   https://gl.xsjny.com/web/robot-analysis-ui/#/analytics")
     print("   账号密码见本地 config/platform_accounts.local.json")
 else:
     print("\n⚠️  部分测试失败，请检查：")

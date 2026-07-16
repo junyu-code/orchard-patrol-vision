@@ -5,7 +5,8 @@
 ## 平台入口
 
 - 甲方A平台：`https://judaonongye.hhzzss.cn/index`
-- 甲方B平台：`https://www.xsjny.com/web/robot-analysis-ui/index.html`
+- 甲方B管理平台：`https://gl.xsjny.com/web/robot-analysis-ui/#/analytics`
+- 甲方B大屏：`https://gl.xsjny.com/web/robot-data-view/index.html`
 
 ## 本地凭据
 

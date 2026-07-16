@@ -11,12 +11,18 @@
 - **协议**: HTTP POST + RTMP
 
 ### 甲方 B（新统一平台）
-- **UDP 数据**: 1.15.149.164:4926
-- **RTMP 推流**: rtmp://www.xsjny.com/live/robot1_sensor1
-- **管理平台**: https://www.xsjny.com/web/robot-analysis-ui/index.html
+- **UDP 数据**: 1.14.205.24:4926
+- **左路 RTMP**: rtmp://gl.xsjny.com/live/robot1_sensor1
+- **右路 RTMP**: rtmp://gl.xsjny.com/live/robot1_sensor2
+- **管理平台**: https://gl.xsjny.com/web/robot-analysis-ui/#/analytics
+- **大屏**: https://gl.xsjny.com/web/robot-data-view/index.html
 - **协议**: UDP 二进制协议 + RTMP
 
 平台登录凭据保存在本地忽略文件 `config/platform_accounts.local.json`，提交到 GitHub 时只保留 `config/platform_accounts.example.json`。
+
+主程序一个进程对应一个视频源和一路 RTMP。`client_b` 当前默认右路 `sensor2`；
+推左路时将 `RTMP_URL` 改为 `RTMP_URL_LEFT`，并把 `SENSOR_ID` 改为 `1`。
+左右相机同时在线需要分别启动采集进程，UDP 遥测只应由其中一个进程上报，避免重复数据。
 
 ## 🔧 快速切换配置
 
@@ -53,10 +59,15 @@ PRESET_CONFIGS = {
     "client_b": {
         "ENABLE_HTTP": False,
         "ENABLE_RTMP": True,
-        "RTMP_URL": "rtmp://www.xsjny.com/live/robot1_sensor1",
+        "RTMP_URL": "rtmp://gl.xsjny.com/live/robot1_sensor2",
+        "RTMP_URL_LEFT": "rtmp://gl.xsjny.com/live/robot1_sensor1",
+        "RTMP_URL_RIGHT": "rtmp://gl.xsjny.com/live/robot1_sensor2",
         "ENABLE_UDP": True,
-        "UDP_HOST": "1.15.149.164",
+        "UDP_HOST": "1.14.205.24",
         "UDP_PORT": 4926,
+        "RTMP_TIMESTAMP_OVERLAY": True,
+        "RTMP_TIME_STANDARD": "utc+8",
+        "UDP_TIME_STANDARD": "utc+8",
     },
     "both": {
         # 所有功能都启用
@@ -116,12 +127,24 @@ ACTIVE_PRESET = "both"
 - **频率**: 每秒一次（无论是否检测到病害）
 - **协议**: 28 字节二进制协议
 - **数据**: 机器人ID、状态、GPS、果树编号、电池电压等
+- **时间**: 原有三字节时间字段发送北京时间（`UTC+8`）`HH:MM:SS`，包长不变
 - **日志**: `📡 UDP 上报 | 帧:123 | 病害检测`
 
 ### RTMP 推流
 - **分辨率**: 自动调整（最大 1280px 宽）
-- **帧率**: 继承源视频或默认 25fps
+- **帧率**: 继承源视频，最高 30fps
+- **码率**: 默认 3000k，峰值 3600k
 - **编码**: H.264
+- **时间**: 远端视频左上角叠加 ISO-8601 北京时间及 `+08:00` 偏移
+
+18 Mbps 环境建议先运行两路 `720p / 30fps / 3000k`。两路编码峰值合计约
+7.2 Mbps；确认大屏并发拉流和服务器出口稳定后，再用 `tools/rtmp_probe.py`
+单路测试 `1080p_25fps_4500k`。大屏每增加一个无转码观看端，服务器出口通常还会
+增加相应视频码率，因此不把 1080p 直接设为默认。
+
+UDP 协议没有日期、毫秒和时区字段；如需平台保存绝对时间戳，应由甲方同步升级
+收发协议。当前方案依靠服务器/视觉主机 NTP 校时，用视频完整的 `UTC+8` 水印与
+UDP 北京时间 `HH:MM:SS` 对齐。
 
 ## 🔍 验证对接
 
@@ -132,9 +155,9 @@ ACTIVE_PRESET = "both"
 ### 甲方B验证
 1. **UDP数据**: 查看日志 `📡 UDP 上报`
 2. **RTMP推流**: 访问管理平台
-   - URL: https://www.xsjny.com/web/robot-analysis-ui/index.html
+   - URL: https://gl.xsjny.com/web/robot-analysis-ui/#/analytics
    - 账号密码见本地 `config/platform_accounts.local.json`
-   - 查看 robot1_sensor1 视频流
+   - 查看左路 `robot1_sensor1` 或右路 `robot1_sensor2` 视频流
 
 ## ⚙️ 高级配置
 
@@ -197,7 +220,7 @@ scripts/
 
 ### RTMP 推流卡顿
 - 检查网络带宽
-- 甲方B默认已经使用低带宽参数：`640` 宽、`15fps`、约 `700k` 码率
+- 甲方B默认使用高清参数：最大 `1280` 宽、`30fps`、约 `3000k` 码率；上行带宽不足时可在 `config/app_config.py` 中下调
 - 检查目标服务器负载
 
 ### HTTP 上报失败
