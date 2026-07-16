@@ -1,0 +1,2 @@
+# Keep the deployed Sonix camera powered while idle and across stream reconnects.
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0c45", ATTR{idProduct}=="636d", TEST=="power/control", ATTR{power/control}="on"

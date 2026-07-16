@@ -18,6 +18,10 @@ import warnings
 from pathlib import Path
 
 from config.app_config import ACTIVE_PRESET, PRESET_NAMES, build_config
+from transport.camera_capabilities import (
+    probe_camera_fps,
+    probe_camera_max_resolution,
+)
 from transport.data_mode import (
     DATA_MODES,
     empty_status_data,
@@ -33,6 +37,12 @@ from transport.stream_resolution import (
     resize_frame_for_stream,
     resolution_label,
     resolve_stream_size,
+)
+from transport.stream_framerate import (
+    COMMON_STREAM_FRAME_RATES,
+    frame_rate_label,
+    normalize_frame_rate_key,
+    resolve_stream_fps,
 )
 
 CONFIG = build_config()
@@ -86,6 +96,69 @@ try:
 except ImportError as e:
     print(f"⚠️ PatrolTreeTimeline 模块未找到: {e}")
     PatrolTreeTimeline = None
+
+
+class PopupAwareComboBox(QComboBox):
+    popup_opened = pyqtSignal()
+
+    def showPopup(self):
+        self.popup_opened.emit()
+        super().showPopup()
+
+
+def apply_readable_combo_style(combo):
+    combo.setStyleSheet("""
+QComboBox {
+    background-color: rgba(31, 38, 35, 205);
+    border: 1px solid rgba(179, 198, 184, 105);
+    border-radius: 4px;
+    color: #f3f6f3;
+    font: 15px "Microsoft YaHei";
+    padding: 0 34px 0 10px;
+}
+QComboBox:hover {
+    background-color: rgba(39, 49, 44, 225);
+    border-color: rgba(162, 206, 174, 165);
+}
+QComboBox:focus {
+    border-color: #83b990;
+}
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 28px;
+    border: none;
+    border-image: url(:/img/icon/下拉_白色.png);
+}
+""")
+    combo.view().setStyleSheet("""
+QListView {
+    background-color: #202724;
+    border: 1px solid #75837a;
+    border-radius: 3px;
+    color: #f4f7f4;
+    font-family: "Microsoft YaHei";
+    font-size: 16px;
+    font-weight: 500;
+    outline: none;
+    padding: 4px;
+    selection-background-color: #477c55;
+    selection-color: #ffffff;
+}
+QListView::item {
+    min-height: 38px;
+    padding: 0 10px;
+    border-radius: 2px;
+}
+QListView::item:hover {
+    background-color: #35443a;
+    color: #ffffff;
+}
+QListView::item:selected {
+    background-color: #477c55;
+    color: #ffffff;
+}
+""")
 
 try:
     from transport.virtual_sensor import VirtualSensorSimulator
@@ -162,7 +235,16 @@ def plot_one_box_chinese(x, im, label=None, color=(128, 128, 128), line_thicknes
 class LoadRawFrames:
     """只读取原始帧，不做YOLO预处理，用于甲方B纯推流模式。"""
 
-    def __init__(self, source, loop=False, pingpong=False, target_fps=0):
+    def __init__(
+        self,
+        source,
+        loop=False,
+        pingpong=False,
+        target_fps=0,
+        camera_reconnect_interval=1.0,
+        should_stop=None,
+        capture_factory=None,
+    ):
         self.source = source
         self.is_camera = source.isnumeric()
         self.loop = loop and not self.is_camera
@@ -171,19 +253,34 @@ class LoadRawFrames:
         self.traversal_index = 0
         self.reverse_frame_index = None
         self.target_fps = float(target_fps or 0)
-        pipe = int(source) if self.is_camera else source
-        if self.is_camera and sys.platform.startswith('win'):
-            self.cap = cv2.VideoCapture(pipe, cv2.CAP_DSHOW)
-            if not self.cap.isOpened():
-                self.cap = cv2.VideoCapture(pipe)
-        elif self.is_camera and sys.platform.startswith('linux'):
-            self.cap = cv2.VideoCapture(pipe, cv2.CAP_V4L2)
-            if not self.cap.isOpened():
-                self.cap = cv2.VideoCapture(pipe)
-        else:
-            self.cap = cv2.VideoCapture(pipe)
-        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 3)
+        self.pipe = int(source) if self.is_camera else source
+        self.camera_reconnect_interval = max(0.0, float(camera_reconnect_interval or 0))
+        self.should_stop = should_stop or (lambda: False)
+        self.capture_factory = capture_factory
+        self.cap = self._open_capture()
         self.count = 0
+        self._refresh_capture_metadata()
+        self.current_source_time = 0.0
+
+    def _open_capture(self):
+        if self.capture_factory is not None:
+            cap = self.capture_factory(self.pipe)
+        elif self.is_camera and sys.platform.startswith('win'):
+            cap = cv2.VideoCapture(self.pipe, cv2.CAP_DSHOW)
+            if not cap.isOpened():
+                cap.release()
+                cap = cv2.VideoCapture(self.pipe)
+        elif self.is_camera and sys.platform.startswith('linux'):
+            cap = cv2.VideoCapture(self.pipe, cv2.CAP_V4L2)
+            if not cap.isOpened():
+                cap.release()
+                cap = cv2.VideoCapture(self.pipe)
+        else:
+            cap = cv2.VideoCapture(self.pipe)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 3)
+        return cap
+
+    def _refresh_capture_metadata(self):
         self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 25
         self.frame_count = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
         self.last_frame_index = max(0, self.frame_count - 1)
@@ -191,7 +288,32 @@ class LoadRawFrames:
             self.frame_step = max(1, round(self.fps / self.target_fps))
         else:
             self.frame_step = 1
-        self.current_source_time = 0.0
+
+    def _wait_for_camera_retry(self):
+        deadline = time.monotonic() + self.camera_reconnect_interval
+        while time.monotonic() < deadline:
+            if self.should_stop():
+                raise StopIteration
+            time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
+
+    def _reconnect_camera(self):
+        self.cap.release()
+        attempts = 0
+        print(f"摄像头 {self.source} 已断开，等待设备恢复")
+        while not self.should_stop():
+            self._wait_for_camera_retry()
+            attempts += 1
+            self.cap = self._open_capture()
+            if self.cap.isOpened():
+                ret, frame = self.cap.read()
+                if ret and frame is not None:
+                    self._refresh_capture_metadata()
+                    print(f"摄像头 {self.source} 已恢复，重连次数: {attempts}")
+                    return ret, frame
+            self.cap.release()
+            if attempts == 1 or attempts % 10 == 0:
+                print(f"摄像头 {self.source} 仍不可用，已重试 {attempts} 次")
+        raise StopIteration
 
     def __iter__(self):
         return self
@@ -202,7 +324,9 @@ class LoadRawFrames:
         else:
             ret, frame = self.cap.read()
             if not ret or frame is None:
-                if self.pingpong:
+                if self.is_camera:
+                    ret, frame = self._reconnect_camera()
+                elif self.pingpong:
                     ret, frame = self._switch_direction_and_read()
                 elif self.loop:
                     self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -723,6 +847,8 @@ class DetThread(QThread):
                         loop=self.cfg.get("LOOP_SOURCE", True),
                         pingpong=pingpong_source,
                         target_fps=raw_frame_target_fps,
+                        camera_reconnect_interval=self.cfg.get("CAMERA_RECONNECT_INTERVAL", 1.0),
+                        should_stop=lambda: self.jump_out,
                     )
                 else:
                     # check_imshow()
@@ -735,6 +861,8 @@ class DetThread(QThread):
                         loop=self.cfg.get("LOOP_SOURCE", True),
                         pingpong=pingpong_source,
                         target_fps=raw_frame_target_fps,
+                        camera_reconnect_interval=self.cfg.get("CAMERA_RECONNECT_INTERVAL", 1.0),
+                        should_stop=lambda: self.jump_out,
                     )
                 else:
                     dataset = LoadImages(self.source, img_size=imgsz, stride=stride)
@@ -750,6 +878,10 @@ class DetThread(QThread):
             self.dataset = dataset
             dataset = iter(dataset)
             rtmp_initialized = False
+            rtmp_retry_at = 0.0
+            push_w = push_h = push_fps = None
+            active_rtmp_resolution = None
+            active_rtmp_frame_rate = None
 
             while True:
                 if self.jump_out:
@@ -763,25 +895,64 @@ class DetThread(QThread):
                 except StopIteration:
                     break
 
-                # RTMP 初始化
-                if self.cfg["ENABLE_RTMP"] and self.rtmp_sender and not rtmp_initialized:
-                    h, w = im0s.shape[:2] # <--- 这里获取的是摄像头原始画面的高和宽
-                    
-                    push_w, push_h = resolve_stream_size(
-                        w,
-                        h,
-                        resolution=self.cfg.get("RTMP_RESOLUTION"),
-                        legacy_max_width=self.cfg.get("RTMP_MAX_WIDTH", 1280),
-                    )
-                    
-                    fps = 25
-                    if self.vid_cap:
-                        fps = int(self.vid_cap.get(cv2.CAP_PROP_FPS)) or 25
-                    fps = min(fps, int(self.cfg.get("RTMP_MAX_FPS", fps)))
-                    # self.rtmp_sender.start(w, h, fps) # <--- 将原始宽高传给推流器
-                    self.rtmp_sender.start(push_w, push_h, fps)
-                    print(f"📹 RTMP 推流启动: {push_w}x{push_h} @ {fps}fps")
-                    rtmp_initialized = True
+                # RTMP 初始化；界面切换分辨率时仅重建推流器，不中断采集线程。
+                if self.cfg["ENABLE_RTMP"] and self.rtmp_sender:
+                    try:
+                        requested_rtmp_resolution = normalize_resolution_key(
+                            self.cfg.get("RTMP_RESOLUTION", "source")
+                        )
+                    except ValueError:
+                        requested_rtmp_resolution = "source"
+                    try:
+                        requested_rtmp_frame_rate = normalize_frame_rate_key(
+                            self.cfg.get("RTMP_FRAME_RATE", "source")
+                        )
+                    except ValueError:
+                        requested_rtmp_frame_rate = "source"
+                    if (
+                        requested_rtmp_resolution != active_rtmp_resolution
+                        or requested_rtmp_frame_rate != active_rtmp_frame_rate
+                    ):
+                        if self.rtmp_sender.is_running:
+                            self.rtmp_sender.stop()
+                        rtmp_initialized = False
+                        rtmp_retry_at = 0.0
+                        push_w = push_h = push_fps = None
+                        active_rtmp_resolution = requested_rtmp_resolution
+                        active_rtmp_frame_rate = requested_rtmp_frame_rate
+
+                    if push_w is None or push_h is None or push_fps is None:
+                        h, w = im0s.shape[:2]
+                        push_w, push_h = resolve_stream_size(
+                            w,
+                            h,
+                            resolution=active_rtmp_resolution,
+                            legacy_max_width=self.cfg.get("RTMP_MAX_WIDTH", 1280),
+                        )
+                        source_fps = 25
+                        if self.vid_cap:
+                            source_fps = int(self.vid_cap.get(cv2.CAP_PROP_FPS)) or 25
+                        push_fps = resolve_stream_fps(
+                            source_fps,
+                            frame_rate=active_rtmp_frame_rate,
+                            max_fps=self.cfg.get("RTMP_MAX_FPS", 0),
+                        )
+
+                    now_monotonic = time.monotonic()
+                    if not rtmp_initialized and now_monotonic >= rtmp_retry_at:
+                        rtmp_initialized = bool(
+                            self.rtmp_sender.start(push_w, push_h, push_fps)
+                        )
+                        if rtmp_initialized:
+                            print(
+                                f"📹 RTMP 推流启动: "
+                                f"{push_w}x{push_h} @ {push_fps}fps"
+                            )
+                        else:
+                            retry_interval = float(
+                                self.cfg.get("RTMP_RECONNECT_INTERVAL", 3.0)
+                            )
+                            rtmp_retry_at = now_monotonic + max(0.1, retry_interval)
 
                 count += 1
                 if count % 30 == 0 and count >= 30:
@@ -1209,7 +1380,12 @@ class DetThread(QThread):
                 # RTMP推流
                 if self.cfg["ENABLE_RTMP"] and self.rtmp_sender and rtmp_initialized:
                     frame_to_push = resize_frame_for_stream(im0s, push_w, push_h)
-                    self.rtmp_sender.send_frame(frame_to_push)
+                    if not self.rtmp_sender.send_frame(frame_to_push):
+                        rtmp_initialized = False
+                        retry_interval = float(
+                            self.cfg.get("RTMP_RECONNECT_INTERVAL", 3.0)
+                        )
+                        rtmp_retry_at = time.monotonic() + max(0.1, retry_interval)
 
                 if self.rate_check:
                     time.sleep(1.0 / self.rate)
@@ -1243,6 +1419,9 @@ class MainWindow(QMainWindow, Ui_mainWindow):
         self.video_recorder = VideoRecorder()
         self.record_timer = QTimer(self)
         self.record_timer.timeout.connect(self.record_next_frame)
+        self.camera_reconnect_timer = QTimer(self)
+        self.camera_reconnect_timer.setSingleShot(True)
+        self.camera_reconnect_timer.timeout.connect(self._restart_camera_detection)
         self.setWindowFlags(Qt.CustomizeWindowHint | Qt.WindowStaysOnTopHint)
         self.setup_compact_left_panel()
         self.setup_recording_controls()
@@ -1313,6 +1492,7 @@ class MainWindow(QMainWindow, Ui_mainWindow):
         pass
 
     def setup_compact_left_panel(self):
+        apply_readable_combo_style(self.comboBox)
         self.label_27.hide()
         self.label_28.hide()
         for widget in (self.label_8, self.checkBox, self.rateSpinBox, self.rateSlider, self.saveCheckBox):
@@ -1587,9 +1767,13 @@ QListWidget{
         self.set_detection_orientation(Qt.Horizontal)
 
     def setup_stream_resolution_control(self):
+        resolution_container = QVBoxLayout()
+        resolution_container.setSpacing(2)
+        resolution_container.setContentsMargins(0, 0, 7, 0)
+
         resolution_layout = QHBoxLayout()
         resolution_layout.setSpacing(8)
-        resolution_layout.setContentsMargins(0, 0, 7, 0)
+        resolution_layout.setContentsMargins(0, 0, 0, 0)
 
         resolution_label_widget = QLabel("推流分辨率", self.groupBox_8)
         resolution_label_widget.setMinimumWidth(92)
@@ -1602,14 +1786,17 @@ QLabel {
 """)
         resolution_layout.addWidget(resolution_label_widget)
 
-        self.streamResolutionCombo = QComboBox(self.groupBox_8)
+        self.streamResolutionCombo = PopupAwareComboBox(self.groupBox_8)
         self.streamResolutionCombo.setObjectName("streamResolutionCombo")
         self.streamResolutionCombo.setMinimumHeight(35)
         self.streamResolutionCombo.setSizePolicy(
             QSizePolicy.Expanding,
             QSizePolicy.Fixed,
         )
-        self.streamResolutionCombo.setStyleSheet(self.comboBox.styleSheet())
+        apply_readable_combo_style(self.streamResolutionCombo)
+        self.streamResolutionCombo.setMaxVisibleItems(
+            min(8, len(COMMON_STREAM_RESOLUTIONS))
+        )
         self.streamResolutionCombo.setToolTip("RTMP 输出尺寸；画面保持原比例")
         for key, label, _width, _height in COMMON_STREAM_RESOLUTIONS:
             self.streamResolutionCombo.addItem(label, key)
@@ -1625,10 +1812,105 @@ QLabel {
         self.streamResolutionCombo.currentIndexChanged.connect(
             self.change_stream_resolution
         )
+        self.streamResolutionCombo.popup_opened.connect(
+            self.show_camera_max_resolution
+        )
         resolution_layout.addWidget(self.streamResolutionCombo, 1)
 
+        self.cameraMaxResolutionLabel = QLabel(self.groupBox_8)
+        self.cameraMaxResolutionLabel.setObjectName("cameraMaxResolutionLabel")
+        self.cameraMaxResolutionLabel.setMinimumHeight(20)
+        self.cameraMaxResolutionLabel.setContentsMargins(100, 0, 0, 0)
+        self.cameraMaxResolutionLabel.setStyleSheet("""
+QLabel#cameraMaxResolutionLabel {
+    color: rgba(218, 218, 218, 155);
+    font: 12px "Microsoft YaHei";
+}
+""")
+        self.camera_max_resolution = probe_camera_max_resolution(
+            self.cfg.get("SOURCE", "0")
+        )
+        self.show_camera_max_resolution()
+
+        resolution_container.addLayout(resolution_layout)
+        resolution_container.addWidget(self.cameraMaxResolutionLabel)
+
+        frame_rate_layout = QHBoxLayout()
+        frame_rate_layout.setSpacing(8)
+        frame_rate_layout.setContentsMargins(0, 3, 0, 0)
+
+        frame_rate_label_widget = QLabel("推流帧率", self.groupBox_8)
+        frame_rate_label_widget.setMinimumWidth(92)
+        frame_rate_label_widget.setMaximumWidth(92)
+        frame_rate_label_widget.setStyleSheet("""
+QLabel {
+    color: rgb(218, 218, 218);
+    font: bold 16px "Microsoft YaHei";
+}
+""")
+        frame_rate_layout.addWidget(frame_rate_label_widget)
+
+        self.streamFrameRateCombo = PopupAwareComboBox(self.groupBox_8)
+        self.streamFrameRateCombo.setObjectName("streamFrameRateCombo")
+        self.streamFrameRateCombo.setMinimumHeight(35)
+        self.streamFrameRateCombo.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Fixed,
+        )
+        apply_readable_combo_style(self.streamFrameRateCombo)
+        self.streamFrameRateCombo.setMaxVisibleItems(
+            len(COMMON_STREAM_FRAME_RATES)
+        )
+        self.streamFrameRateCombo.setToolTip("RTMP 输出帧率")
+        for key, label, _fps in COMMON_STREAM_FRAME_RATES:
+            self.streamFrameRateCombo.addItem(label, key)
+
+        configured_frame_rate = self.cfg.get("RTMP_FRAME_RATE", "source")
+        try:
+            configured_frame_rate = normalize_frame_rate_key(configured_frame_rate)
+        except ValueError:
+            configured_frame_rate = "source"
+            self.cfg["RTMP_FRAME_RATE"] = configured_frame_rate
+        selected_frame_rate_index = self.streamFrameRateCombo.findData(
+            configured_frame_rate
+        )
+        self.streamFrameRateCombo.setCurrentIndex(
+            max(0, selected_frame_rate_index)
+        )
+        self.streamFrameRateCombo.currentIndexChanged.connect(
+            self.change_stream_frame_rate
+        )
+        self.streamFrameRateCombo.popup_opened.connect(
+            self.show_camera_fps
+        )
+        frame_rate_layout.addWidget(self.streamFrameRateCombo, 1)
+
+        self.cameraFpsLabel = QLabel(self.groupBox_8)
+        self.cameraFpsLabel.setObjectName("cameraFpsLabel")
+        self.cameraFpsLabel.setMinimumHeight(20)
+        self.cameraFpsLabel.setContentsMargins(100, 0, 0, 0)
+        self.cameraFpsLabel.setStyleSheet("""
+QLabel#cameraFpsLabel {
+    color: rgba(218, 218, 218, 155);
+    font: 12px "Microsoft YaHei";
+}
+""")
+        self.camera_fps = probe_camera_fps(self.cfg.get("SOURCE", "0"))
+        self.show_camera_fps()
+
+        resolution_container.addLayout(frame_rate_layout)
+        resolution_container.addWidget(self.cameraFpsLabel)
+
         # 放在模型选择之后；遥测面板随后会被提升到它的下方。
-        self.verticalLayout_8.insertLayout(2, resolution_layout)
+        self.verticalLayout_8.insertLayout(2, resolution_container)
+
+    def show_camera_max_resolution(self):
+        if self.camera_max_resolution is None:
+            text = "相机最大分辨率：未检测到"
+        else:
+            width, height = self.camera_max_resolution
+            text = f"相机最大分辨率：{width} x {height}"
+        self.cameraMaxResolutionLabel.setText(text)
 
     def change_stream_resolution(self, _index):
         resolution = self.streamResolutionCombo.currentData()
@@ -1636,7 +1918,29 @@ QLabel {
             return
         resolution = normalize_resolution_key(resolution)
         self.cfg["RTMP_RESOLUTION"] = resolution
-        self.statistic_msg(f"推流分辨率：{resolution_label(resolution)}")
+        if self.det_thread.isRunning():
+            self.statistic_msg(f"正在切换推流分辨率：{resolution_label(resolution)}")
+        else:
+            self.statistic_msg(f"推流分辨率：{resolution_label(resolution)}")
+
+    def show_camera_fps(self):
+        if self.camera_fps is None:
+            text = "相机当前采集帧率：未检测到"
+        else:
+            text = f"相机当前采集帧率：{self.camera_fps:g} FPS"
+        self.cameraFpsLabel.setText(text)
+
+    def change_stream_frame_rate(self, _index):
+        frame_rate = self.streamFrameRateCombo.currentData()
+        if not frame_rate:
+            return
+        frame_rate = normalize_frame_rate_key(frame_rate)
+        self.cfg["RTMP_FRAME_RATE"] = frame_rate
+        label = frame_rate_label(frame_rate)
+        if self.det_thread.isRunning():
+            self.statistic_msg(f"正在切换推流帧率：{label}")
+        else:
+            self.statistic_msg(f"推流帧率：{label}")
 
     def setup_recording_controls(self):
         self.recordButton = QPushButton("●", self.groupBox_5)
@@ -1784,11 +2088,28 @@ QPushButton#recordButton[recording="true"] {
 
     def handle_detection_finished(self):
         self.streamResolutionCombo.setEnabled(True)
-        if self.recording_mode != "camera":
+        if self.recording_mode == "camera":
+            output_path = self.stop_recording(show_message=False)
+            if output_path is not None:
+                self.statistic_msg(f"视频源已结束，录像已保存：{output_path}")
+        if (
+            self._closing
+            or self.det_thread.jump_out
+            or not str(self.det_thread.source).isnumeric()
+        ):
             return
-        output_path = self.stop_recording(show_message=False)
-        if output_path is not None:
-            self.statistic_msg(f"视频源已结束，录像已保存：{output_path}")
+        retry_ms = max(
+            100,
+            int(float(self.cfg.get("CAMERA_RECONNECT_INTERVAL", 1.0)) * 1000),
+        )
+        self.statistic_msg("摄像头连接中断，正在自动恢复")
+        self.camera_reconnect_timer.start(retry_ms)
+
+    def _restart_camera_detection(self):
+        if self._closing or self.det_thread.jump_out:
+            return
+        if not self.det_thread.isRunning():
+            self.run_or_continue()
 
     def set_detection_orientation(self, orientation):
         self.splitter.setOrientation(orientation)
@@ -1875,16 +2196,16 @@ QPushButton:pressed {
         self.rtsp_win.close()
 
     def run_or_continue(self):
-        if self._is_unavailable_camera_source(self.det_thread.source):
-            self.runButton.setChecked(Qt.Unchecked)
-            self.statistic_msg(f'摄像头 {self.det_thread.source} 打开失败，请选择本地图片/视频或更换摄像头编号')
-            return
+        self.camera_reconnect_timer.stop()
+        camera_unavailable = self._is_unavailable_camera_source(self.det_thread.source)
+        if camera_unavailable:
+            self.statistic_msg(f'摄像头 {self.det_thread.source} 暂不可用，正在等待重连')
         self.det_thread.jump_out = False
         self.det_thread.is_continue = True
         if not self.det_thread.isRunning():
-            self.streamResolutionCombo.setEnabled(False)
             self.det_thread.start()
-        self.statistic_msg('运行中')
+        if not camera_unavailable:
+            self.statistic_msg('运行中')
 
     @staticmethod
     def _is_unavailable_camera_source(source):
@@ -1902,6 +2223,7 @@ QPushButton:pressed {
         return not ok
 
     def stop(self):
+        self.camera_reconnect_timer.stop()
         recording_path = None
         if self.recording_mode == "camera":
             recording_path = self.stop_recording(show_message=False)
@@ -1919,6 +2241,7 @@ QPushButton:pressed {
         print("ℹ️ 正在关闭界面并释放巡检资源")
 
         self.qtimer.stop()
+        self.camera_reconnect_timer.stop()
         self.stop_recording(show_message=False)
         if hasattr(self, "rtsp_win") and self.rtsp_win is not None:
             try: self.rtsp_win.close()

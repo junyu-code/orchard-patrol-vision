@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
 Name=Orchard Patrol Vision
-Comment=Start orchard patrol vision after graphical login
-Exec=/bin/bash /home/rm/orchard-patrol-vision/detect.sh
+Comment=Start the supervised orchard patrol vision service
+Exec=/usr/bin/systemctl --user start yolo-detect.service
 Path=/home/rm/orchard-patrol-vision
 Terminal=false
 X-GNOME-Autostart-enabled=true

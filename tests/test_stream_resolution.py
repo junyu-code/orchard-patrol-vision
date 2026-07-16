@@ -11,9 +11,22 @@ from transport.stream_resolution import (
 
 class StreamResolutionTests(unittest.TestCase):
     def test_normalizes_common_profile_aliases(self):
+        self.assertEqual(normalize_resolution_key("240p"), "426x240")
         self.assertEqual(normalize_resolution_key("720p"), "1280x720")
         self.assertEqual(normalize_resolution_key("1920 x 1080"), "1920x1080")
+        self.assertEqual(normalize_resolution_key("2k"), "2560x1440")
+        self.assertEqual(normalize_resolution_key("4k"), "3840x2160")
         self.assertEqual(normalize_resolution_key("auto"), "source")
+
+    def test_additional_profiles_resolve_to_exact_encoder_sizes(self):
+        self.assertEqual(
+            resolve_stream_size(640, 480, resolution="540p"),
+            (960, 540),
+        )
+        self.assertEqual(
+            resolve_stream_size(1920, 1080, resolution="1440p"),
+            (2560, 1440),
+        )
 
     def test_explicit_profile_controls_encoder_size(self):
         self.assertEqual(

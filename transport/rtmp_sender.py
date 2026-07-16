@@ -32,6 +32,16 @@ class RtmpSender:
         self.time_standard = normalize_time_standard(time_standard)
         self.process = None
         self.is_running = False
+
+    @staticmethod
+    def _process_is_alive(process):
+        if process is None:
+            return False
+        poll = getattr(process, "poll", None)
+        if poll is None:
+            return True
+        return_code = poll()
+        return return_code is None or not isinstance(return_code, int)
         
     def start(self, width, height, fps=25):
         """
@@ -43,8 +53,10 @@ class RtmpSender:
         if not self.rtmp_url:
             print("错误: 未配置 RTMP 推流地址")
             return False
-        if self.is_running:
-            return
+        if self.is_running and self._process_is_alive(self.process):
+            return True
+        if self.process is not None:
+            self.stop()
             
         # 根据操作系统选择ffmpeg命令路径，通常假设ffmpeg在环境变量中
         ffmpeg_cmd = 'ffmpeg'
@@ -103,19 +115,28 @@ class RtmpSender:
                 f"RTMP推流已启动: {_display_rtmp_url(self.rtmp_url)} "
                 f"({width}x{height}@{fps}fps, {self.video_bitrate})"
             )
+            return True
         except FileNotFoundError:
             print("错误: 未找到 FFmpeg。请确保 FFmpeg 已安装并添加到系统环境变量 PATH 中。")
             self.is_running = False
+            return False
         except Exception as e:
             print(f"RTMP推流启动失败: {e}")
             self.is_running = False
+            return False
 
     def send_frame(self, frame):
         """
         发送一帧图像到FFmpeg
         :param frame: OpenCV格式的numpy数组 (BGR)
         """
-        if not self.is_running or self.process is None:
+        if (
+            not self.is_running
+            or self.process is None
+            or not self._process_is_alive(self.process)
+        ):
+            if self.process is not None:
+                self.stop()
             return False
         
         try:

@@ -168,11 +168,13 @@ BASE_CONFIG = {
     "IMG_SIZE": 640,
     "RAW_STREAM_ONLY": False,
     "LOOP_SOURCE": True,
+    "CAMERA_RECONNECT_INTERVAL": 1.0,
 
     # RTMP 推流配置
     "RTMP_MAX_WIDTH": 1280,
     "RTMP_RESOLUTION": "1280x720",
     "RTMP_MAX_FPS": 30,
+    "RTMP_FRAME_RATE": "source",
     "RTMP_VIDEO_BITRATE": "3000k",
     "RTMP_MAXRATE": "3600k",
     "RTMP_BUFSIZE": "6000k",
@@ -180,6 +182,7 @@ BASE_CONFIG = {
     "PLAYBACK_RATE_FPS": 0,
     "RTMP_TIMESTAMP_OVERLAY": False,
     "RTMP_TIME_STANDARD": "local",
+    "RTMP_RECONNECT_INTERVAL": 3.0,
 
     # 机器人标识，用于甲方B UDP 协议
     "ROBOT_ID": 1,

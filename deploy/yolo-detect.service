@@ -1,13 +1,13 @@
 [Unit]
-Description=Orchard Patrol Vision desktop launcher
-After=graphical.target network-online.target
-Wants=network-online.target
+Description=Orchard Patrol Vision desktop application
+After=graphical-session.target
+PartOf=graphical-session.target
 ConditionPathExists=/home/rm/orchard-patrol-vision/detect.sh
+StartLimitIntervalSec=60
+StartLimitBurst=10
 
 [Service]
 Type=simple
-User=rm
-Group=rm
 WorkingDirectory=/home/rm/orchard-patrol-vision
 Environment=DISPLAY=:0
 Environment=QT_QPA_PLATFORM=xcb
@@ -15,10 +15,12 @@ Environment=APP_PRESET=client_b
 Environment=DATA_MODE=debug
 Environment=TELEMETRY_SERIAL_PORT=/dev/ttyGPS_IN
 Environment=TELEMETRY_SERIAL_BAUDRATE=9600
+EnvironmentFile=-/home/rm/orchard-patrol-vision/.env
 ExecStart=/bin/bash /home/rm/orchard-patrol-vision/detect.sh --foreground
 KillMode=control-group
-Restart=on-failure
+Restart=always
 RestartSec=5
+TimeoutStopSec=10
 
 [Install]
-WantedBy=graphical.target
+WantedBy=graphical-session.target

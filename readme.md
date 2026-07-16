@@ -199,7 +199,7 @@ python tools/serial_self_test.py telemetry-loopback
 python tools/serial_self_test.py telemetry --port /dev/ttyTELEMETRY_IN --duration 10
 ```
 
-Linux 部署可使用 `detect.sh`、`deploy/orchard-patrol-vision.desktop` 或 `deploy/yolo-detect.service`。这些文件只由 Linux 手动安装或调用，Windows 启动路径不会执行 systemd 或桌面自启动配置。
+Linux 图形环境部署使用用户级 `deploy/yolo-detect.service`；不要同时直接运行 `detect.sh` 和桌面自启动脚本。服务会在摄像头或进程异常后自动恢复。`deploy/99-orchard-camera-power.rules` 用于关闭现场 Sonix 摄像头的 USB autosuspend。这些文件只由 Linux 手动安装，Windows 不执行 systemd 或 udev 配置。
 
 ## 注意事项
 

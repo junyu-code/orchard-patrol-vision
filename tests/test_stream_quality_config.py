@@ -10,11 +10,14 @@ class StreamQualityConfigTests(unittest.TestCase):
         self.assertEqual(config["RTMP_MAX_WIDTH"], 1280)
         self.assertEqual(config["RTMP_RESOLUTION"], "1280x720")
         self.assertEqual(config["RTMP_MAX_FPS"], 30)
+        self.assertEqual(config["RTMP_FRAME_RATE"], "source")
         self.assertEqual(config["RTMP_VIDEO_BITRATE"], "3000k")
         self.assertEqual(config["RTMP_MAXRATE"], "3600k")
         self.assertEqual(config["RTMP_BUFSIZE"], "6000k")
         self.assertEqual(config["RAW_FRAME_TARGET_FPS"], 30)
         self.assertEqual(config["PLAYBACK_RATE_FPS"], 30)
+        self.assertEqual(config["CAMERA_RECONNECT_INTERVAL"], 1.0)
+        self.assertEqual(config["RTMP_RECONNECT_INTERVAL"], 3.0)
         self.assertTrue(config["RTMP_TIMESTAMP_OVERLAY"])
         self.assertEqual(config["RTMP_TIME_STANDARD"], "utc+8")
         self.assertEqual(config["UDP_TIME_STANDARD"], "utc+8")
@@ -41,6 +44,7 @@ class StreamQualityConfigTests(unittest.TestCase):
             "RTMP_MAX_WIDTH",
             "RTMP_RESOLUTION",
             "RTMP_MAX_FPS",
+            "RTMP_FRAME_RATE",
             "RTMP_VIDEO_BITRATE",
             "RTMP_MAXRATE",
             "RTMP_BUFSIZE",
