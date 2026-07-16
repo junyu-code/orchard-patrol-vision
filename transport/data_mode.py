@@ -107,7 +107,9 @@ def select_gps_dms(
         and gps_snapshot is not None
         and getattr(gps_snapshot, "valid", False)
     ):
-        return gps_snapshot.to_dms()
+        real_gps_dms = gps_snapshot.to_dms()
+        if real_gps_dms is not None:
+            return real_gps_dms
     if policy.use_virtual_gps:
         return virtual_gps_dms
     return None
