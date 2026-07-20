@@ -16,6 +16,11 @@ from threading import Thread
 
 import cv2
 import numpy as np
+from transport.camera_capabilities import (
+    camera_backend,
+    camera_capture_source,
+    is_camera_source,
+)
 import torch
 import torch.nn.functional as F
 import yaml
@@ -238,21 +243,34 @@ class LoadWebcam:  # for inference
     def __init__(self, pipe='0', img_size=640, stride=32):
         self.img_size = img_size
         self.stride = stride
-        self.pipe = eval(pipe) if pipe.isnumeric() else pipe
-        if pipe.isnumeric():
-            pipe = eval(pipe)
-            # Windows 使用 DirectShow，Linux 使用 V4L2，其他系统交给 OpenCV 自动选择
-            if sys.platform.startswith('win'):
-                self.cap = cv2.VideoCapture(pipe, cv2.CAP_DSHOW)
-            elif sys.platform.startswith('linux'):
-                self.cap = cv2.VideoCapture(pipe, cv2.CAP_V4L2)
-            else:
-                self.cap = cv2.VideoCapture(pipe)
+        pipe = str(pipe)
+        self.pipe = camera_capture_source(pipe) if is_camera_source(pipe) else pipe
+        if is_camera_source(pipe):
+            backend = camera_backend(cv2)
+            self.cap = cv2.VideoCapture(self.pipe, backend) if backend else cv2.VideoCapture(self.pipe)
             if not self.cap.isOpened():
-                self.cap = cv2.VideoCapture(pipe)
+                self.cap.release()
+                self.cap = cv2.VideoCapture(self.pipe)
+            # Windows 使用 DirectShow，Linux 使用 V4L2，其他系统交给 OpenCV 自动选择
         else:
-            self.cap = cv2.VideoCapture(pipe)
+            self.cap = cv2.VideoCapture(self.pipe)
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 3)  # set buffer size
+        self.source_fps = float(self.cap.get(cv2.CAP_PROP_FPS) or 0) or 25.0
+        self.target_fps = 0.0
+        self._frame_ratio = 1.0
+        self._output_frame_count = 0
+        self.frame_step = 1
+
+    def set_target_fps(self, target_fps):
+        """设置识别采集目标帧率，低于源帧率时丢弃过渡帧。"""
+        self.target_fps = float(target_fps or 0)
+        self._frame_ratio = (
+            self.source_fps / self.target_fps
+            if self.target_fps > 0 and self.target_fps < self.source_fps
+            else 1.0
+        )
+        self.frame_step = max(1, round(self._frame_ratio))
+        self._output_frame_count = 0
 
     def __iter__(self):
         self.count = -1
@@ -268,6 +286,16 @@ class LoadWebcam:  # for inference
         # Read frame
         ret_val, img0 = self.cap.read()
         assert ret_val and img0 is not None, f'Camera Error {self.pipe}'
+        self._output_frame_count += 1
+        previous_target = int(
+            (self._output_frame_count - 1) * self._frame_ratio + 0.5
+        )
+        next_target = int(self._output_frame_count * self._frame_ratio + 0.5)
+        skip_count = max(0, next_target - previous_target - 1)
+        for _ in range(skip_count):
+            ret_val, _ = self.cap.read()
+            if not ret_val:
+                break
         img0 = cv2.flip(img0, 1)  # flip left-right
         img_path = 'webcam.jpg'
         # print(f'webcam {self.count}: ', end='')

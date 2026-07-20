@@ -4,18 +4,18 @@ from config.app_config import build_config
 
 
 class StreamQualityConfigTests(unittest.TestCase):
-    def test_client_b_uses_hd_stream_profile(self):
+    def test_client_b_uses_source_stream_profile_by_default(self):
         config = build_config("client_b")
 
         self.assertEqual(config["RTMP_MAX_WIDTH"], 1280)
-        self.assertEqual(config["RTMP_RESOLUTION"], "1280x720")
-        self.assertEqual(config["RTMP_MAX_FPS"], 30)
+        self.assertEqual(config["RTMP_RESOLUTION"], "source")
+        self.assertEqual(config["RTMP_MAX_FPS"], 0)
         self.assertEqual(config["RTMP_FRAME_RATE"], "source")
         self.assertEqual(config["RTMP_VIDEO_BITRATE"], "3000k")
         self.assertEqual(config["RTMP_MAXRATE"], "3600k")
         self.assertEqual(config["RTMP_BUFSIZE"], "6000k")
-        self.assertEqual(config["RAW_FRAME_TARGET_FPS"], 30)
-        self.assertEqual(config["PLAYBACK_RATE_FPS"], 30)
+        self.assertEqual(config["RAW_FRAME_TARGET_FPS"], 0)
+        self.assertEqual(config["PLAYBACK_RATE_FPS"], 0)
         self.assertEqual(config["CAMERA_RECONNECT_INTERVAL"], 1.0)
         self.assertEqual(config["RTMP_RECONNECT_INTERVAL"], 3.0)
         self.assertTrue(config["RTMP_TIMESTAMP_OVERLAY"])
@@ -36,7 +36,7 @@ class StreamQualityConfigTests(unittest.TestCase):
             "rtmp://gl.xsjny.com/live/robot1_sensor2",
         )
 
-    def test_combined_preset_uses_same_hd_stream_profile(self):
+    def test_combined_preset_uses_same_source_stream_profile(self):
         client_b = build_config("client_b")
         combined = build_config("both")
 

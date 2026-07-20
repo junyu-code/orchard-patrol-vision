@@ -19,6 +19,10 @@ from pathlib import Path
 
 from config.app_config import ACTIVE_PRESET, PRESET_NAMES, build_config
 from transport.camera_capabilities import (
+    camera_backend,
+    camera_capture_source,
+    default_camera_source,
+    is_camera_source,
     probe_camera_fps,
     probe_camera_max_resolution,
 )
@@ -43,6 +47,7 @@ from transport.stream_framerate import (
     frame_rate_label,
     normalize_frame_rate_key,
     resolve_stream_fps,
+    StreamFramePacer,
 )
 
 CONFIG = build_config()
@@ -245,15 +250,16 @@ class LoadRawFrames:
         should_stop=None,
         capture_factory=None,
     ):
-        self.source = source
-        self.is_camera = source.isnumeric()
+        self.source = str(source)
+        self.is_camera = is_camera_source(self.source)
         self.loop = loop and not self.is_camera
         self.pingpong = bool(pingpong and self.loop)
         self.playback_direction = 1
         self.traversal_index = 0
         self.reverse_frame_index = None
+        self._reverse_output_count = 0
         self.target_fps = float(target_fps or 0)
-        self.pipe = int(source) if self.is_camera else source
+        self.pipe = camera_capture_source(self.source) if self.is_camera else self.source
         self.camera_reconnect_interval = max(0.0, float(camera_reconnect_interval or 0))
         self.should_stop = should_stop or (lambda: False)
         self.capture_factory = capture_factory
@@ -265,13 +271,9 @@ class LoadRawFrames:
     def _open_capture(self):
         if self.capture_factory is not None:
             cap = self.capture_factory(self.pipe)
-        elif self.is_camera and sys.platform.startswith('win'):
-            cap = cv2.VideoCapture(self.pipe, cv2.CAP_DSHOW)
-            if not cap.isOpened():
-                cap.release()
-                cap = cv2.VideoCapture(self.pipe)
-        elif self.is_camera and sys.platform.startswith('linux'):
-            cap = cv2.VideoCapture(self.pipe, cv2.CAP_V4L2)
+        elif self.is_camera:
+            backend = camera_backend(cv2)
+            cap = cv2.VideoCapture(self.pipe, backend) if backend else cv2.VideoCapture(self.pipe)
             if not cap.isOpened():
                 cap.release()
                 cap = cv2.VideoCapture(self.pipe)
@@ -284,10 +286,24 @@ class LoadRawFrames:
         self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 25
         self.frame_count = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
         self.last_frame_index = max(0, self.frame_count - 1)
-        if self.target_fps > 0 and self.fps > self.target_fps:
-            self.frame_step = max(1, round(self.fps / self.target_fps))
-        else:
-            self.frame_step = 1
+        self._frame_ratio = (
+            self.fps / self.target_fps
+            if self.target_fps > 0 and self.target_fps < self.fps
+            else 1.0
+        )
+        self.frame_step = max(1, round(self._frame_ratio))
+        if not hasattr(self, "_output_frame_count"):
+            self._output_frame_count = 0
+
+    def set_target_fps(self, target_fps):
+        self.target_fps = float(target_fps or 0)
+        self._frame_ratio = (
+            self.fps / self.target_fps
+            if self.target_fps > 0 and self.target_fps < self.fps
+            else 1.0
+        )
+        self.frame_step = max(1, round(self._frame_ratio))
+        self._output_frame_count = 0
 
     def _wait_for_camera_retry(self):
         deadline = time.monotonic() + self.camera_reconnect_interval
@@ -371,19 +387,39 @@ class LoadRawFrames:
         """从尾到头读取单帧，形成真正的倒放。"""
         if self.reverse_frame_index is None:
             self.reverse_frame_index = self.last_frame_index
+            self._reverse_output_count = 0
         if self.reverse_frame_index < 0:
             return self._switch_direction_and_read()
 
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.reverse_frame_index)
         ret, frame = self.cap.read()
-        self.reverse_frame_index -= self.frame_step
+        self._reverse_output_count += 1
+        self.reverse_frame_index = self.last_frame_index - int(
+            self._reverse_output_count * self._frame_ratio + 0.5
+        )
         return ret, frame
 
     def _skip_forward_frames(self):
         """按目标输出帧率跳过若干原视频帧，保持原视频时间轴不变。"""
-        if self.frame_step <= 1 or self.is_camera:
+        self._output_frame_count += 1
+        if self._frame_ratio <= 1:
             return
-        next_frame = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES) or 0) + self.frame_step - 1
+        if self.is_camera:
+            # 实时相机不能 seek，使用累计比例处理 30→20 等非整除档位。
+            previous_target = int(
+                (self._output_frame_count - 1) * self._frame_ratio + 0.5
+            )
+            next_target = int(self._output_frame_count * self._frame_ratio + 0.5)
+            skip_count = max(0, next_target - previous_target - 1)
+            for _ in range(skip_count):
+                if self.should_stop():
+                    return
+                ret, _ = self.cap.read()
+                if not ret:
+                    return
+            return
+        current_next_frame = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES) or 0)
+        next_frame = int(self._output_frame_count * self._frame_ratio + 0.5)
         if self.frame_count > 0:
             next_frame = min(next_frame, self.frame_count)
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, next_frame)
@@ -745,7 +781,7 @@ class DetThread(QThread):
         if not self.cfg.get("PINGPONG_SOURCE", False):
             return False
         source = str(self.source)
-        if source.isnumeric() or source.lower().startswith(('rtsp://', 'rtmp://', 'http://', 'https://')):
+        if is_camera_source(source) or source.lower().startswith(('rtsp://', 'rtmp://', 'http://', 'https://')):
             return False
         expected_name = str(self.cfg.get("PATROL_SOURCE_NAME", "")).lower()
         return not expected_name or Path(source).name.lower() == expected_name
@@ -840,7 +876,7 @@ class DetThread(QThread):
             pingpong_source = self._should_pingpong_source()
             raw_frame_target_fps = self.cfg.get("RAW_FRAME_TARGET_FPS", 0)
 
-            if self.source.isnumeric() or self.source.lower().startswith(('rtsp://', 'rtmp://', 'http://', 'https')):
+            if is_camera_source(self.source) or self.source.lower().startswith(('rtsp://', 'rtmp://', 'http://', 'https')):
                 if raw_stream_only:
                     dataset = LoadRawFrames(
                         self.source,
@@ -882,6 +918,7 @@ class DetThread(QThread):
             push_w = push_h = push_fps = None
             active_rtmp_resolution = None
             active_rtmp_frame_rate = None
+            stream_pacer = None
 
             while True:
                 if self.jump_out:
@@ -931,12 +968,15 @@ class DetThread(QThread):
                         )
                         source_fps = 25
                         if self.vid_cap:
-                            source_fps = int(self.vid_cap.get(cv2.CAP_PROP_FPS)) or 25
+                            source_fps = float(self.vid_cap.get(cv2.CAP_PROP_FPS) or 0) or 25.0
                         push_fps = resolve_stream_fps(
                             source_fps,
                             frame_rate=active_rtmp_frame_rate,
                             max_fps=self.cfg.get("RTMP_MAX_FPS", 0),
                         )
+                        if hasattr(dataset, "set_target_fps"):
+                            dataset.set_target_fps(push_fps)
+                        stream_pacer = StreamFramePacer(push_fps)
 
                     now_monotonic = time.monotonic()
                     if not rtmp_initialized and now_monotonic >= rtmp_retry_at:
@@ -1378,16 +1418,20 @@ class DetThread(QThread):
                         print(f"❌ UDP 发送失败 ({e.__class__.__name__}): {str(e)}")
 
                 # RTMP推流
-                if self.cfg["ENABLE_RTMP"] and self.rtmp_sender and rtmp_initialized:
-                    frame_to_push = resize_frame_for_stream(im0s, push_w, push_h)
-                    if not self.rtmp_sender.send_frame(frame_to_push):
-                        rtmp_initialized = False
-                        retry_interval = float(
-                            self.cfg.get("RTMP_RECONNECT_INTERVAL", 3.0)
-                        )
-                        rtmp_retry_at = time.monotonic() + max(0.1, retry_interval)
+                if self.cfg["ENABLE_RTMP"] and self.rtmp_sender:
+                    if stream_pacer is not None:
+                        stream_pacer.wait()
+                    if rtmp_initialized:
+                        frame_to_push = resize_frame_for_stream(im0s, push_w, push_h)
+                        if not self.rtmp_sender.send_frame(frame_to_push):
+                            rtmp_initialized = False
+                            retry_interval = float(
+                                self.cfg.get("RTMP_RECONNECT_INTERVAL", 3.0)
+                            )
+                            rtmp_retry_at = time.monotonic() + max(0.1, retry_interval)
 
-                if self.rate_check:
+                # RTMP 已由绝对时间节流器控制，不能再叠加旧的逐帧固定休眠。
+                if self.rate_check and stream_pacer is None:
                     time.sleep(1.0 / self.rate)
 
                 if not self.cfg.get("HEADLESS", False):
@@ -2095,7 +2139,7 @@ QPushButton#recordButton[recording="true"] {
         if (
             self._closing
             or self.det_thread.jump_out
-            or not str(self.det_thread.source).isnumeric()
+            or not is_camera_source(self.det_thread.source)
         ):
             return
         retry_ms = max(
@@ -2182,7 +2226,7 @@ QPushButton:pressed {
 
     def chose_cam(self):
         self.stop()
-        self.det_thread.source = '0'
+        self.det_thread.source = default_camera_source()
         self.statistic_msg('摄像头模式')
 
     def chose_rtsp(self):
@@ -2209,11 +2253,11 @@ QPushButton:pressed {
 
     @staticmethod
     def _is_unavailable_camera_source(source):
-        if not str(source).isnumeric():
+        if not is_camera_source(source):
             return False
-        camera_id = int(source)
+        camera_id = camera_capture_source(source)
         # Windows 优先使用 DirectShow，其他系统交给 OpenCV 自动选择
-        backend = cv2.CAP_DSHOW if sys.platform.startswith("win") else 0
+        backend = camera_backend(cv2)
         cap = cv2.VideoCapture(camera_id, backend) if backend else cv2.VideoCapture(camera_id)
         ok = cap.isOpened()
         if ok:

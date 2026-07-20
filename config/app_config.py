@@ -7,6 +7,8 @@
 import os
 from copy import deepcopy
 
+from transport.camera_capabilities import default_camera_source
+
 
 # 数据来源总开关：real | debug | simulation；默认调试模式
 DATA_MODE = "debug"
@@ -60,13 +62,13 @@ PRESET_CONFIGS = {
         "UDP_TREE_EVENT_DEBUG": False,
         "PINGPONG_SOURCE": True,
         "RTMP_MAX_WIDTH": 1280,
-        "RTMP_RESOLUTION": "1280x720",
-        "RTMP_MAX_FPS": 30,
+        "RTMP_RESOLUTION": "source",
+        "RTMP_MAX_FPS": 0,
         "RTMP_VIDEO_BITRATE": "3000k",
         "RTMP_MAXRATE": "3600k",
         "RTMP_BUFSIZE": "6000k",
-        "RAW_FRAME_TARGET_FPS": 30,
-        "PLAYBACK_RATE_FPS": 30,
+        "RAW_FRAME_TARGET_FPS": 0,
+        "PLAYBACK_RATE_FPS": 0,
         "RTMP_TIMESTAMP_OVERLAY": True,
         "RTMP_TIME_STANDARD": "utc+8",
         "UDP_TIME_STANDARD": "utc+8",
@@ -100,13 +102,13 @@ PRESET_CONFIGS = {
         "UDP_TREE_EVENT_DEBUG": False,
         "PINGPONG_SOURCE": True,
         "RTMP_MAX_WIDTH": 1280,
-        "RTMP_RESOLUTION": "1280x720",
-        "RTMP_MAX_FPS": 30,
+        "RTMP_RESOLUTION": "source",
+        "RTMP_MAX_FPS": 0,
         "RTMP_VIDEO_BITRATE": "3000k",
         "RTMP_MAXRATE": "3600k",
         "RTMP_BUFSIZE": "6000k",
-        "RAW_FRAME_TARGET_FPS": 30,
-        "PLAYBACK_RATE_FPS": 30,
+        "RAW_FRAME_TARGET_FPS": 0,
+        "PLAYBACK_RATE_FPS": 0,
         "RTMP_TIMESTAMP_OVERLAY": True,
         "RTMP_TIME_STANDARD": "utc+8",
         "UDP_TIME_STANDARD": "utc+8",
@@ -162,7 +164,7 @@ BASE_CONFIG = {
 
     # YOLO 模型配置
     "WEIGHTS": "./pt/best.pt",
-    "SOURCE": "0",
+    "SOURCE": default_camera_source(),
     "CONF_THRES": 0.8,
     "IOU_THRES": 0.45,
     "IMG_SIZE": 640,
@@ -172,8 +174,8 @@ BASE_CONFIG = {
 
     # RTMP 推流配置
     "RTMP_MAX_WIDTH": 1280,
-    "RTMP_RESOLUTION": "1280x720",
-    "RTMP_MAX_FPS": 30,
+    "RTMP_RESOLUTION": "source",
+    "RTMP_MAX_FPS": 0,
     "RTMP_FRAME_RATE": "source",
     "RTMP_VIDEO_BITRATE": "3000k",
     "RTMP_MAXRATE": "3600k",

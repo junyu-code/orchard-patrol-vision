@@ -28,7 +28,7 @@ APP_PRESET="${APP_PRESET:-client_b}"
 MAIN_ARGS=(
     --preset "${APP_PRESET}"
     --data-mode "${DATA_MODE}"
-    --source 0
+    --source /dev/video0
     --auto-start
     --enable-telemetry-serial
     --telemetry-port "${TELEMETRY_SERIAL_PORT}"

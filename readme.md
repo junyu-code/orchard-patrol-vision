@@ -145,7 +145,7 @@ python main.py --preset both
 - 左路 RTMP：`rtmp://gl.xsjny.com/live/robot1_sensor1`
 - 右路 RTMP：`rtmp://gl.xsjny.com/live/robot1_sensor2`（`client_b` 当前默认）
 - UDP：`1.14.205.24:4926`
-- 视频：最大 `1280` 宽、`30fps`、`3000k`，远端画面叠加 ISO-8601 北京时间（`UTC+8`）
+- 视频默认跟随相机原生分辨率和帧率；需要限流时可在界面选择输出档位，远端画面叠加 ISO-8601 北京时间（`UTC+8`）
 - UDP 数据包：28 字节二进制协议，包头 `0x66`，包尾 `0x99`
 
 UDP 上报内容包括：
