@@ -1,6 +1,6 @@
 # 双甲方对接使用指南
 
-本项目使用一个 `main.py` 运行时承载两套平台业务。检测、视频采集、遥测和资源清理流程共用，平台差异通过 HTTP/UDP/RTMP 适配器和运行预设切换。
+本项目使用一个 `main.py` 运行时承载两套平台业务。检测、视频采集、遥测和资源清理流程共用，平台差异通过 HTTP/UDP/RTMP 适配器和启动预设选择。
 
 ## 📋 配置方案
 
@@ -24,7 +24,7 @@
 推左路时将 `RTMP_URL` 改为 `RTMP_URL_LEFT`，并把 `SENSOR_ID` 改为 `1`。
 左右相机同时在线需要分别启动采集进程，UDP 遥测只应由其中一个进程上报，避免重复数据。`both` 只表示同一个进程同时启用 HTTP 和 UDP，不会自动创建第二路视频采集。
 
-## 🔧 快速切换配置
+## 🔧 部署目标选择
 
 可以在 `config/app_config.py` 中修改 `ACTIVE_PRESET`，也可以在命令行或部署环境中覆盖：
 
@@ -41,14 +41,19 @@ python main.py --preset client_b
 python main.py --preset both
 ```
 
-Linux 的 `detect.sh` 读取 `APP_PRESET` 后传给同一个 `main.py`，例如：
+Linux 的 `detect.sh` 读取 `APP_PRESET` 后传给同一个 `main.py`。固定一台机器的服务目标时只需配置一次，例如：
 
 ```bash
-APP_PRESET=client_a ./detect.sh
-APP_PRESET=client_b ./detect.sh
+APP_PRESET=client_a ./detect.sh  # 部署到甲方A
+APP_PRESET=client_b ./detect.sh  # 部署到甲方B
 ```
 
-systemd 部署时可在项目根目录 `.env` 中设置 `APP_PRESET`，更新服务后重新加载配置即可。
+systemd 部署时可在项目根目录 `.env` 中设置 `APP_PRESET`。程序启动后不会动态切换协议；修改目标后需要重新加载并重启服务：
+
+```bash
+systemctl --user daemon-reload
+systemctl --user restart yolo-detect.service
+```
 
 ### 选项说明
 
@@ -109,7 +114,7 @@ python main.py --preset client_a
    HTTP: ✅ | RTMP: ✅ | UDP: ❌
 ```
 
-### 2. 切换到甲方B
+### 2. 启动甲方B
 
 ```bash
 python main.py --preset client_b

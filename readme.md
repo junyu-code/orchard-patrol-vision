@@ -111,9 +111,9 @@ scripts\run-client-b-demo.bat
 - 视频正放结束后倒放，倒放结束后继续正放
 - 按固定巡检时间轴模拟左右两侧果树 ID 上报
 
-## 双甲方切换
+## 双甲方预设
 
-A、B 两套业务共用同一个 `main.py` 运行时，检测、采集、遥测和资源清理流程不按分支复制；仅通过配置预设选择 HTTP、UDP 和 RTMP 适配器。具体切换规则见 `docs/DUAL_CLIENT_GUIDE.md`。
+A、B 两套业务共用同一个 `main.py` 运行时，检测、采集、遥测和资源清理流程不按分支复制；部署时选择一个预设来启用对应的 HTTP、UDP 和 RTMP 适配器。程序运行中不会动态切换协议，修改预设后需要重启进程。具体规则见 `docs/DUAL_CLIENT_GUIDE.md`。
 
 在 `config/app_config.py` 中修改：
 
