@@ -18,7 +18,10 @@ Environment=TELEMETRY_SERIAL_BAUDRATE=9600
 EnvironmentFile=-/home/rm/orchard-patrol-vision/.env
 ExecStart=/bin/bash /home/rm/orchard-patrol-vision/detect.sh --foreground
 KillMode=control-group
+# Restart every exit except the explicit pause status (exit code 77).
 Restart=always
+SuccessExitStatus=77
+RestartPreventExitStatus=77
 RestartSec=5
 TimeoutStopSec=10
 

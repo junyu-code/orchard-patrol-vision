@@ -113,6 +113,8 @@ scripts\run-client-b-demo.bat
 
 ## 双甲方切换
 
+A、B 两套业务共用同一个 `main.py` 运行时，检测、采集、遥测和资源清理流程不按分支复制；仅通过配置预设选择 HTTP、UDP 和 RTMP 适配器。具体切换规则见 `docs/DUAL_CLIENT_GUIDE.md`。
+
 在 `config/app_config.py` 中修改：
 
 ```python
@@ -200,6 +202,37 @@ python tools/serial_self_test.py telemetry --port /dev/ttyTELEMETRY_IN --duratio
 ```
 
 Linux 图形环境部署使用用户级 `deploy/yolo-detect.service`；不要同时直接运行 `detect.sh` 和桌面自启动脚本。服务会在摄像头或进程异常后自动恢复。`deploy/99-orchard-camera-power.rules` 用于关闭现场 Sonix 摄像头的 USB autosuspend。这些文件只由 Linux 手动安装，Windows 不执行 systemd 或 udev 配置。
+
+### 暂停自动巡检
+
+通过 `systemd` 启动时，连续 60 秒内关闭 UI 三次会停止当前巡检任务，并暂停服务的自动恢复。前两次关闭后服务会在 5 秒后恢复，第三次关闭后保持停止，以便将机器用于其他工作。异常崩溃仍会自动恢复。
+
+可在项目根目录的 `.env` 中调整阈值，例如：
+
+```bash
+ORCHARD_UI_CLOSE_LIMIT=3
+ORCHARD_UI_CLOSE_WINDOW_SECONDS=60
+```
+
+要立即停止而不等待三次关闭，可执行：
+
+```bash
+systemctl --user stop yolo-detect.service
+```
+
+需要恢复巡检时执行：
+
+```bash
+systemctl --user start yolo-detect.service
+```
+
+更新部署文件后需重新加载服务定义：
+
+```bash
+install -Dm644 deploy/yolo-detect.service ~/.config/systemd/user/yolo-detect.service
+systemctl --user daemon-reload
+systemctl --user restart yolo-detect.service
+```
 
 ## 注意事项
 

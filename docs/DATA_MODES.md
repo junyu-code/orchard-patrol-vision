@@ -30,7 +30,7 @@ Linux 部署脚本支持环境变量，未指定时为 `debug`：
 DATA_MODE=real ./detect.sh
 ```
 
-公共脚本默认保持甲方 A 和通用遥测设备名。甲方 B 现场可以显式覆盖，仓库中的 systemd 服务已经使用这组配置：
+公共脚本通过 `APP_PRESET` 选择甲方业务，未指定时沿用 `detect.sh` 的 `client_b` 默认值；遥测端口和数据模式仍可独立覆盖。仓库中的 systemd 服务使用同一套环境变量：
 
 ```bash
 APP_PRESET=client_b \

@@ -120,6 +120,11 @@ echo "[$(date)] 数据模式: ${DATA_MODE}" >> "${LOG_FILE}"
 
 if [ "${RUN_FOREGROUND}" = true ]; then
     # systemd 必须直接管理 Python 进程，exec 可避免遗留孤立的 nohup 进程。
+    # 前两次关闭 UI 会让服务恢复；60 秒内第三次关闭会以人工暂停状态退出。
+    export ORCHARD_SUPERVISED=1
+    export ORCHARD_UI_CLOSE_STATE_FILE="${PROJECT_DIR}/runtime/supervised-ui-close.json"
+    export ORCHARD_UI_CLOSE_LIMIT="${ORCHARD_UI_CLOSE_LIMIT:-3}"
+    export ORCHARD_UI_CLOSE_WINDOW_SECONDS="${ORCHARD_UI_CLOSE_WINDOW_SECONDS:-60}"
     echo $$ > "${PROJECT_DIR}/detect.pid"
     echo "[$(date)] systemd 前台模式启动，PID: $$" >> "${LOG_FILE}"
     echo "[$(date)] 日志文件位置: ${LOG_FILE}" >> "${LOG_FILE}"

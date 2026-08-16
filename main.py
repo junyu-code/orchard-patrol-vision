@@ -49,6 +49,10 @@ from transport.stream_framerate import (
     resolve_stream_fps,
     StreamFramePacer,
 )
+from transport.supervision import (
+    RESTART_AFTER_UI_CLOSE_EXIT_CODE,
+    register_supervised_ui_close,
+)
 
 CONFIG = build_config()
 
@@ -2404,10 +2408,54 @@ QPushButton:pressed {
 
     def closeEvent(self, event):
         self.shutdown()
-        event.accept()
         app = QApplication.instance()
         if app is not None:
-            QTimer.singleShot(0, app.quit)
+            schedule_application_exit(app, self._ui_close_exit_code())
+        event.accept()
+
+    @staticmethod
+    def _ui_close_exit_code():
+        """Return a supervised restart or pause status for an intentional UI close."""
+        if os.environ.get("ORCHARD_SUPERVISED") != "1":
+            return 0
+
+        try:
+            decision = register_supervised_ui_close(
+                os.environ.get(
+                    "ORCHARD_UI_CLOSE_STATE_FILE",
+                    "runtime/supervised-ui-close.json",
+                ),
+                close_limit=os.environ.get("ORCHARD_UI_CLOSE_LIMIT", 3),
+                window_seconds=os.environ.get(
+                    "ORCHARD_UI_CLOSE_WINDOW_SECONDS",
+                    60,
+                ),
+            )
+        except OSError as exc:
+            print(f"⚠️ 无法记录界面关闭次数，将按自动恢复处理：{exc}")
+            return RESTART_AFTER_UI_CLOSE_EXIT_CODE
+        if decision.should_pause:
+            print(
+                "⏸ 连续关闭界面 {}/{} 次，已暂停巡检服务；"
+                "手动启动服务后可恢复。".format(
+                    decision.close_count,
+                    decision.close_limit,
+                )
+            )
+        else:
+            print(
+                "ℹ️ 已记录第 {}/{} 次界面关闭，监督服务将自动恢复。".format(
+                    decision.close_count,
+                    decision.close_limit,
+                )
+            )
+        return decision.exit_code
+
+
+def schedule_application_exit(app, exit_code):
+    """Exit through one explicit path so Qt preserves the requested status."""
+    app.setQuitOnLastWindowClosed(False)
+    QTimer.singleShot(0, lambda: app.exit(exit_code))
 
 
 def should_run_headless(args):

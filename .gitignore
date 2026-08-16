@@ -53,6 +53,7 @@ data/images/*.png
 *.log
 wandb/
 /detect.pid
+/runtime/
 
 # OS
 .DS_Store
