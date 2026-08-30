@@ -2,10 +2,11 @@
 
 果园巡检视觉与推流系统，用于果园巡检小车的视频采集、病虫害识别、平台数据上报和 RTMP 视频推流。
 
-项目当前保留 YOLOv5 检测能力，并在此基础上集成了两套甲方平台对接逻辑：
+项目当前保留 YOLOv5 检测能力，并按园区集成平台对接逻辑：
 
-- 甲方 A：HTTP 病虫害数据上报 + RTMP 推流
-- 甲方 B：UDP 机器人巡检遥测 + RTMP 推流
+- 恭城柑桔果园：HTTP 病虫害数据上报，可选 RTMP 推流
+- 兴安葡萄园：UDP 机器人巡检遥测 + RTMP 推流
+- 农科所橘子园：UDP 机器人巡检遥测 + RTMP 推流
 
 ## 核心能力
 
@@ -20,7 +21,9 @@
 - GPS 速度缺失时的连续坐标估算、异常过滤和平滑
 - 实时遥测 UI、原始画面录像和程序窗口录像
 - 果树 ID、GPS、速度、方向、电池等巡检数据模拟
-- 双甲方预设配置快速切换
+- 园区、数据协议、视频协议和相机输入快速切换
+- 左右双路相机采集、原图/检测结果四格显示
+- 可单独启用或禁用 YOLOv5 模型检测
 
 ## 目录结构
 
@@ -28,7 +31,7 @@
 orchard-patrol-vision/
 ├─ main.py                         # 主程序入口：界面、检测线程、上报和推流调度
 ├─ config/
-│  ├─ app_config.py                # 双甲方运行配置
+│  ├─ app_config.py                # 园区和协议运行配置
 │  ├─ endpoints.json               # 当前和旧版平台地址备份
 │  └─ platform_accounts.example.json
 ├─ transport/
@@ -111,14 +114,14 @@ scripts\run-client-b-demo.bat
 - 视频正放结束后倒放，倒放结束后继续正放
 - 按固定巡检时间轴模拟左右两侧果树 ID 上报
 
-## 双甲方预设
+## 园区与协议配置
 
-A、B 两套业务共用同一个 `main.py` 运行时，检测、采集、遥测和资源清理流程不按分支复制；部署时选择一个预设来启用对应的 HTTP、UDP 和 RTMP 适配器。程序运行中不会动态切换协议，修改预设后需要重启进程。具体规则见 `docs/DUAL_CLIENT_GUIDE.md`。
+A、B 两套历史业务共用同一个 `main.py` 运行时。界面启动后可在“园区”下拉框选择目标园区，程序会自动应用该园区的数据链路和视频地址；切换园区、相机或模型检测状态后，停止当前任务再重新启动即可使工作线程使用新配置。具体地址目录见 `docs/DUAL_CLIENT_GUIDE.md`。
 
 在 `config/app_config.py` 中修改：
 
 ```python
-# 在这里选择默认配置：'client_a' | 'client_b' | 'both'
+# 在这里选择默认配置；也支持下方三个园区名称
 ACTIVE_PRESET = "client_b"
 ```
 
@@ -128,15 +131,26 @@ ACTIVE_PRESET = "client_b"
 python main.py --preset client_a
 python main.py --preset client_b
 python main.py --preset both
+python main.py --preset "恭城柑桔果园"
+python main.py --preset "兴安葡萄园"
+python main.py --preset "农科所橘子园"
 ```
 
 配置含义：
 
 | 配置         | 说明                                       |
 | ------------ | ------------------------------------------ |
-| `client_a` | 仅对接甲方 A：HTTP + RTMP                  |
-| `client_b` | 仅对接甲方 B：UDP + RTMP                   |
-| `both`     | 同时开启 HTTP、UDP、RTMP，主要用于联调测试 |
+| `client_a` / `恭城柑桔果园` | HTTP + 可选 RTMP |
+| `client_b` / `兴安葡萄园` | UDP + RTMP |
+| `农科所橘子园` | UDP + RTMP |
+| `both` | 同时开启 HTTP、UDP、RTMP，主要用于联调测试 |
+
+历史 `client_a`、`client_b`、`both` 参数继续兼容。启动后可在界面中配置：
+
+- 左路和右路相机输入；未选择右路时只显示左路
+- 横向或纵向显示原图、检测结果
+- 模型检测开关；关闭后仍可进行原始视频采集和推流
+- 视频输出分辨率、帧率和对应 RTMP 地址
 
 ## 甲方 B 推流与 UDP
 
