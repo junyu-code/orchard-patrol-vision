@@ -144,8 +144,8 @@ python main.py --preset both
 
 - 管理平台：`https://gl.xsjny.com/web/robot-analysis-ui/#/analytics`
 - 大屏：`https://gl.xsjny.com/web/robot-data-view/index.html`
-- 左路 RTMP：`rtmp://gl.xsjny.com/live/robot1_sensor1`
-- 右路 RTMP：`rtmp://gl.xsjny.com/live/robot1_sensor2`（`client_b` 当前默认）
+- 左路 RTMP：`rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor1`（`client_b` 当前默认）
+- 右路 RTMP：`rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor2`
 - UDP：`1.14.205.24:4926`
 - 视频默认跟随相机原生分辨率和帧率；需要限流时可在界面选择输出档位，远端画面叠加 ISO-8601 北京时间（`UTC+8`）
 - UDP 数据包：28 字节二进制协议，包头 `0x66`，包尾 `0x99`

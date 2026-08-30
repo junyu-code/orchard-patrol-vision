@@ -1,5 +1,6 @@
 import os
 import sys
+from copy import deepcopy
 
 # 按操作系统选择 Qt 平台插件：Ubuntu/Linux 使用 xcb，Windows 使用 windows
 if sys.platform.startswith("linux"):
@@ -17,7 +18,12 @@ from PIL import Image, ImageDraw, ImageFont
 import warnings
 from pathlib import Path
 
-from config.app_config import ACTIVE_PRESET, PRESET_NAMES, build_config
+from config.app_config import (
+    ACTIVE_PRESET,
+    PRESET_NAMES,
+    ORCHARD_NAMES,
+    build_config,
+)
 from transport.camera_capabilities import (
     camera_backend,
     camera_capture_source,
@@ -1473,6 +1479,10 @@ class MainWindow(QMainWindow, Ui_mainWindow):
         self.setWindowFlags(Qt.CustomizeWindowHint | Qt.WindowStaysOnTopHint)
         self.setup_compact_left_panel()
         self.setup_recording_controls()
+        self.setup_transport_controls()
+        self.setup_camera_source_controls()
+        self.setup_multi_camera_display()
+        self.setup_model_detection_control()
 
         self.minButton.clicked.connect(self.showMinimized)
         self.maxButton.clicked.connect(self.max_or_restore)
@@ -1487,26 +1497,65 @@ class MainWindow(QMainWindow, Ui_mainWindow):
         self.pt_list.sort(key=lambda x: os.path.getsize('./pt/' + x) if os.path.exists('./pt/' + x) else 0)
         self.comboBox.addItems(self.pt_list)
 
-        self.det_thread = DetThread(config=self.cfg)
-
         self.model_type = self.comboBox.currentText() if self.pt_list else self.cfg["WEIGHTS"]
-        if not self.cfg.get("RAW_STREAM_ONLY", False):
-            self.det_thread.weights = f"./pt/{self.model_type}" if self.pt_list else self.cfg["WEIGHTS"]
-        self.det_thread.source = self.cfg["SOURCE"]
-        self.det_thread.percent_length = self.progressBar.maximum()
-
-        self.det_thread.send_raw.connect(self.handle_raw_frame)
-        self.det_thread.send_img.connect(lambda x: self.show_image(x, self.out_video))
-        self.det_thread.send_statistic.connect(self.show_statistic)
-        self.det_thread.send_data.connect(self.show_realtime_data)
-        self.det_thread.send_msg.connect(self.show_msg)
-        self.det_thread.send_percent.connect(lambda x: self.progressBar.setValue(x))
-        self.det_thread.send_fps.connect(lambda x: self.fps_label.setText(x))
-        self.det_thread.finished.connect(self.handle_detection_finished)
+        self._transport_dirty = False
+        self._worker_config_dirty = False
+        self._create_det_thread()
 
         self.bind_signals()
         self.load_setting()
         self.start_background_data_receivers()
+
+    def _create_det_thread(self):
+        """Create a worker from the current UI-selected transport configuration."""
+        self.det_thread = DetThread(config=self.cfg)
+        if not self.cfg.get("RAW_STREAM_ONLY", False):
+            self.det_thread.weights = (
+                f"./pt/{self.model_type}" if self.pt_list else self.cfg["WEIGHTS"]
+            )
+        self.det_thread.source = self.cfg["SOURCE"]
+        self.det_thread.percent_length = self.progressBar.maximum()
+        self.det_thread.send_raw.connect(self.handle_left_raw_frame)
+        self.det_thread.send_img.connect(lambda x: self.show_image(x, self.left_detect_video))
+        self.det_thread.send_statistic.connect(self.show_statistic)
+        self.det_thread.send_data.connect(self.show_realtime_data)
+        self.det_thread.send_msg.connect(self.show_msg)
+        self.det_thread.send_percent.connect(lambda x: self.progressBar.setValue(x))
+        self.det_thread.send_fps.connect(self.update_left_fps)
+        self.det_thread.finished.connect(self.handle_detection_finished)
+        self._create_right_det_thread()
+
+    def _create_right_det_thread(self):
+        right_source = str(self.cfg.get("CAMERA_SOURCE_RIGHT", "") or "").strip()
+        self.right_det_thread = None
+        if not right_source:
+            return
+        right_config = deepcopy(self.cfg)
+        right_config.update(
+            {
+                "SOURCE": right_source,
+                "ENABLE_HTTP": False,
+                "ENABLE_UDP": False,
+                "ENABLE_RTMP": bool(
+                    self.cfg.get("ENABLE_RTMP") and self.cfg.get("RTMP_URL_RIGHT")
+                ),
+                "RTMP_URL": str(self.cfg.get("RTMP_URL_RIGHT", "") or ""),
+                "ENABLE_SERIAL": False,
+                "ENABLE_TELEMETRY_SERIAL": False,
+                "ENABLE_GPS_SERIAL": False,
+                "ENABLE_PATROL_TIMELINE": False,
+            }
+        )
+        self.right_det_thread = DetThread(config=right_config)
+        self.right_det_thread.source = right_source
+        if not right_config.get("RAW_STREAM_ONLY", False) and self.pt_list:
+            self.right_det_thread.weights = f"./pt/{self.model_type}"
+        self.right_det_thread.send_raw.connect(self.handle_right_raw_frame)
+        self.right_det_thread.send_img.connect(
+            lambda x: self.show_image(x, self.right_detect_video)
+        )
+        self.right_det_thread.send_fps.connect(self.update_right_fps)
+        self.right_det_thread.finished.connect(self.handle_right_detection_finished)
 
     def start_background_data_receivers(self):
         """窗口启动后立即接收真实数据，不要求先启动检测。"""
@@ -1618,10 +1667,10 @@ QLabel {
 
         mode_layout = QHBoxLayout()
         mode_layout.setSpacing(8)
-        self.horizontalModeButton = QPushButton("横向检测", self.groupBox_8)
-        self.verticalModeButton = QPushButton("纵向检测", self.groupBox_8)
-        self.horizontalModeButton.setToolTip("原始画面和检测画面左右排列")
-        self.verticalModeButton.setToolTip("原始画面和检测画面上下排列")
+        self.horizontalModeButton = QPushButton("横向显示", self.groupBox_8)
+        self.verticalModeButton = QPushButton("纵向显示", self.groupBox_8)
+        self.horizontalModeButton.setToolTip("左右排列两路相机画面")
+        self.verticalModeButton.setToolTip("上下排列两路相机画面")
         for button in (self.horizontalModeButton, self.verticalModeButton):
             button.setCheckable(True)
             button.setMinimumHeight(34)
@@ -1761,6 +1810,8 @@ QFrame[role="divider"] {
                 ("work_mode", "任务模式"),
                 ("frame_index", "当前帧"),
                 ("disease_count", "识别目标"),
+                ("left_fps", "左路FPS"),
+                ("right_fps", "右路FPS"),
                 ("channels", "数据链路"),
             )),
         ):
@@ -1813,6 +1864,284 @@ QListWidget{
 }
 """)
         self.set_detection_orientation(Qt.Horizontal)
+
+    def setup_transport_controls(self):
+        """Add the single园区 selector; protocols are part of each园区 preset."""
+        transport_layout = QHBoxLayout()
+        transport_layout.setSpacing(8)
+        transport_layout.setContentsMargins(0, 2, 7, 0)
+        label = QLabel("园区", self.groupBox_8)
+        label.setMinimumWidth(92)
+        label.setMaximumWidth(92)
+        label.setStyleSheet(
+            'QLabel { color: rgb(218, 218, 218); font: bold 16px "Microsoft YaHei"; }'
+        )
+        self.orchardCombo = PopupAwareComboBox(self.groupBox_8)
+        self.orchardCombo.setObjectName("orchardCombo")
+        self.orchardCombo.setMinimumHeight(35)
+        self.orchardCombo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        apply_readable_combo_style(self.orchardCombo)
+        transport_layout.addWidget(label)
+        transport_layout.addWidget(self.orchardCombo, 1)
+
+        for name in ORCHARD_NAMES:
+            self.orchardCombo.addItem(name, name)
+
+        preset_to_orchard = {
+            "client_a": "恭城柑桔果园",
+            "client_b": "兴安葡萄园",
+            "both": "恭城柑桔果园",
+        }
+        configured_orchard = self.cfg.get("ORCHARD_NAME") or preset_to_orchard.get(
+            self.cfg.get("PRESET_NAME"), ORCHARD_NAMES[0]
+        )
+        orchard_index = self.orchardCombo.findData(configured_orchard)
+        self.orchardCombo.setCurrentIndex(max(0, orchard_index))
+        self.orchardCombo.currentIndexChanged.connect(self.change_orchard)
+        self.verticalLayout_8.insertLayout(2, transport_layout)
+
+    def setup_camera_source_controls(self):
+        """Add left/right camera selectors below the stream quality controls."""
+        source_layout = QVBoxLayout()
+        source_layout.setSpacing(4)
+        source_layout.setContentsMargins(0, 2, 7, 0)
+        title = QLabel("相机输入", self.groupBox_8)
+        title.setStyleSheet(
+            'QLabel { color: rgb(218, 218, 218); font: bold 16px "Microsoft YaHei"; }'
+        )
+        source_layout.addWidget(title)
+
+        try:
+            _count, detected = Camera().get_cam_num()
+        except Exception:
+            detected = []
+        camera_items = [(f"摄像头 {index}", str(index)) for index in detected]
+        if not camera_items:
+            camera_items = [("默认摄像头", str(default_camera_source()))]
+
+        def add_camera_row(label_text, object_name, allow_none=False):
+            row = QHBoxLayout()
+            row.setSpacing(8)
+            label = QLabel(label_text, self.groupBox_8)
+            label.setMinimumWidth(92)
+            label.setMaximumWidth(92)
+            label.setStyleSheet(
+                'QLabel { color: rgb(218, 218, 218); font: bold 16px "Microsoft YaHei"; }'
+            )
+            combo = PopupAwareComboBox(self.groupBox_8)
+            combo.setObjectName(object_name)
+            combo.setMinimumHeight(35)
+            combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            apply_readable_combo_style(combo)
+            if allow_none:
+                combo.addItem("不启用", "")
+            for text, value in camera_items:
+                combo.addItem(text, value)
+            row.addWidget(label)
+            row.addWidget(combo, 1)
+            source_layout.addLayout(row)
+            return combo
+
+        self.leftCameraCombo = add_camera_row("左路相机", "leftCameraCombo")
+        self.rightCameraCombo = add_camera_row(
+            "右路相机", "rightCameraCombo", allow_none=True
+        )
+        left_source = str(
+            self.cfg.get("CAMERA_SOURCE_LEFT") or self.cfg.get("SOURCE") or camera_items[0][1]
+        )
+        right_source = str(self.cfg.get("CAMERA_SOURCE_RIGHT", "") or "")
+        if left_source and self.leftCameraCombo.findData(left_source) < 0:
+            self.leftCameraCombo.addItem(left_source, left_source)
+        if right_source and self.rightCameraCombo.findData(right_source) < 0:
+            self.rightCameraCombo.addItem(right_source, right_source)
+        left_index = self.leftCameraCombo.findData(left_source)
+        self.leftCameraCombo.setCurrentIndex(max(0, left_index))
+        right_index = self.rightCameraCombo.findData(right_source)
+        if len(camera_items) > 1 and not right_source:
+            right_index = 2
+        self.rightCameraCombo.setCurrentIndex(max(0, right_index))
+        self.cfg["CAMERA_SOURCE_LEFT"] = str(self.leftCameraCombo.currentData() or "")
+        self.cfg["CAMERA_SOURCE_RIGHT"] = str(self.rightCameraCombo.currentData() or "")
+        if self.cfg["CAMERA_SOURCE_LEFT"]:
+            self.cfg["SOURCE"] = self.cfg["CAMERA_SOURCE_LEFT"]
+        self.leftCameraCombo.currentIndexChanged.connect(self.change_camera_source)
+        self.rightCameraCombo.currentIndexChanged.connect(self.change_camera_source)
+        self.verticalLayout_8.insertLayout(3, source_layout)
+
+    def change_camera_source(self, _index):
+        self.cfg["CAMERA_SOURCE_LEFT"] = str(self.leftCameraCombo.currentData() or "")
+        self.cfg["CAMERA_SOURCE_RIGHT"] = str(self.rightCameraCombo.currentData() or "")
+        if self.cfg["CAMERA_SOURCE_LEFT"]:
+            self.cfg["SOURCE"] = self.cfg["CAMERA_SOURCE_LEFT"]
+        self._worker_config_dirty = True
+        if hasattr(self, "videoContainer"):
+            self.refresh_video_layout()
+        if hasattr(self, "det_thread"):
+            if self.right_det_thread is not None and self.right_det_thread.isRunning():
+                self.right_det_thread.jump_out = True
+                self.right_det_thread.wait(2000)
+            if self.right_det_thread is not None:
+                self.right_det_thread.cleanup_resources(stop_gps=True)
+            self._create_right_det_thread()
+        if hasattr(self, "det_thread") and self.det_thread.isRunning():
+            self.statistic_msg("相机输入已更新，请停止任务后重新启动")
+
+    def setup_multi_camera_display(self):
+        """Replace the legacy two-way splitter with a four-cell camera grid."""
+        self._display_orientation = Qt.Horizontal
+        self.verticalLayout_4.removeWidget(self.groupBox_3)
+        self.groupBox_3.hide()
+        self.verticalLayout_4.removeWidget(self.splitter)
+        self.splitter.hide()
+
+        self.videoContainer = QWidget(self.groupBox_201)
+        self.videoContainer.setObjectName("videoContainer")
+        self.videoGrid = QGridLayout(self.videoContainer)
+        self.videoGrid.setContentsMargins(0, 0, 0, 0)
+        self.videoGrid.setSpacing(2)
+        self.left_raw_video = self._make_video_label("左路原图")
+        self.left_detect_video = self._make_video_label("左路检测")
+        self.right_raw_video = self._make_video_label("右路原图")
+        self.right_detect_video = self._make_video_label("右路检测")
+        self.raw_video = self.left_raw_video
+        self.out_video = self.left_detect_video
+        self.verticalLayout_4.insertWidget(1, self.videoContainer, 1)
+        self.set_detection_orientation(Qt.Horizontal)
+
+    def _make_video_label(self, placeholder):
+        label = QLabel(self.videoContainer)
+        label.setMinimumSize(200, 120)
+        label.setAlignment(Qt.AlignCenter)
+        label.setStyleSheet("color: rgb(218, 218, 218); background: rgba(0, 0, 0, 35);")
+        label.setText(placeholder)
+        return label
+
+    def refresh_video_layout(self):
+        enabled = not bool(self.cfg.get("RAW_STREAM_ONLY", False))
+        labels = (
+            self.left_raw_video,
+            self.left_detect_video,
+            self.right_raw_video,
+            self.right_detect_video,
+        )
+        for label in labels:
+            self.videoGrid.removeWidget(label)
+            label.hide()
+        right_enabled = bool(self.cfg.get("CAMERA_SOURCE_RIGHT", ""))
+        for row in range(4):
+            self.videoGrid.setRowStretch(row, 0)
+        for column in range(2):
+            self.videoGrid.setColumnStretch(column, 0)
+        if self._display_orientation == Qt.Horizontal:
+            self.videoGrid.setRowStretch(0, 1)
+            self.videoGrid.setRowStretch(1, 1)
+            self.videoGrid.setColumnStretch(0, 1)
+            self.videoGrid.setColumnStretch(1, 1)
+        else:
+            self.videoGrid.setColumnStretch(0, 1)
+            for row in range(4):
+                self.videoGrid.setRowStretch(row, 1)
+        if enabled:
+            if self._display_orientation == Qt.Horizontal:
+                if right_enabled:
+                    cells = [(self.left_raw_video, 0, 0), (self.left_detect_video, 1, 0)]
+                    cells.extend([(self.right_raw_video, 0, 1), (self.right_detect_video, 1, 1)])
+                else:
+                    cells = [
+                        (self.left_raw_video, 0, 0, 1, 2),
+                        (self.left_detect_video, 1, 0, 1, 2),
+                    ]
+            else:
+                cells = [(self.left_raw_video, 0, 0), (self.left_detect_video, 1, 0)]
+                if right_enabled:
+                    cells.extend([(self.right_raw_video, 2, 0), (self.right_detect_video, 3, 0)])
+        else:
+            if right_enabled:
+                cells = [
+                    (self.left_raw_video, 0, 0),
+                    (self.right_raw_video, 0, 1),
+                ] if self._display_orientation == Qt.Horizontal else [
+                    (self.left_raw_video, 0, 0),
+                    (self.right_raw_video, 1, 0),
+                ]
+            elif self._display_orientation == Qt.Horizontal:
+                cells = [(self.left_raw_video, 0, 0, 1, 2)]
+            else:
+                cells = [(self.left_raw_video, 0, 0, 4, 1)]
+        for cell in cells:
+            label, row, column, *span = cell
+            self.videoGrid.addWidget(label, row, column, *(span or [1, 1]))
+            label.show()
+
+    def update_left_fps(self, text):
+        self.set_realtime_value("left_fps", text)
+        self.set_realtime_source("left_fps", "real")
+
+    def update_right_fps(self, text):
+        self.set_realtime_value("right_fps", text)
+        self.set_realtime_source("right_fps", "real")
+
+    def setup_model_detection_control(self):
+        """Place the model detection switch at the top-left of the video area."""
+        self.modelDetectionButton = QPushButton(self.groupBox_8)
+        self.modelDetectionButton.setObjectName("modelDetectionButton")
+        self.modelDetectionButton.setCheckable(True)
+        self.modelDetectionButton.setChecked(not bool(self.cfg.get("RAW_STREAM_ONLY", False)))
+        self.modelDetectionButton.setMinimumHeight(30)
+        self.modelDetectionButton.setCursor(Qt.PointingHandCursor)
+        self.modelDetectionButton.setStyleSheet("""
+QPushButton#modelDetectionButton {
+    background-color: rgba(68, 126, 85, 185);
+    border: 1px solid rgba(157, 195, 165, 150);
+    border-radius: 4px;
+    color: #edf5ee;
+    font: bold 14px "Microsoft YaHei";
+    padding: 0 10px;
+}
+QPushButton#modelDetectionButton:checked {
+    background-color: rgba(68, 126, 85, 185);
+}
+QPushButton#modelDetectionButton:!checked {
+    background-color: rgba(202, 215, 205, 28);
+    border-color: rgba(171, 194, 177, 82);
+    color: #d6ded8;
+}
+QPushButton#modelDetectionButton:hover {
+    background-color: rgba(78, 143, 96, 205);
+}
+""")
+        self.modelDetectionButton.setText(
+            "禁用模型检测" if self.modelDetectionButton.isChecked() else "启用模型检测"
+        )
+        self.modelDetectionButton.toggled.connect(self.change_model_detection)
+        self.verticalLayout_8.insertWidget(1, self.modelDetectionButton)
+
+    def change_model_detection(self, enabled):
+        self.cfg["RAW_STREAM_ONLY"] = not enabled
+        self._worker_config_dirty = True
+        self.modelDetectionButton.setText("禁用模型检测" if enabled else "启用模型检测")
+        self.refresh_video_layout()
+        if hasattr(self, "det_thread") and self.det_thread.isRunning():
+            self.statistic_msg("模型检测配置已更新，请停止任务后重新启动")
+
+    def change_orchard(self, _index):
+        """Apply the selected园区 preset while preserving camera/model settings."""
+        orchard = self.orchardCombo.currentData() or ORCHARD_NAMES[0]
+        selected = build_config(orchard)
+        preset_keys = (
+            "PRESET_NAME", "ORCHARD_NAME", "DATA_PROTOCOL", "VIDEO_PROTOCOL",
+            "ENABLE_HTTP", "HTTP_URL", "ENABLE_UDP", "UDP_HOST", "UDP_PORT",
+            "UDP_ORCHARD_ID", "UDP_ADD_ORCHARD_PREFIX", "ENABLE_RTMP", "RTMP_URL",
+            "RTMP_URL_LEFT", "RTMP_URL_RIGHT", "SENSOR_ID", "ENABLE_PATROL_TIMELINE",
+            "PATROL_SOURCE_NAME", "PATROL_TREE_TIMES", "PATROL_START_TREE_ID",
+            "PATROL_TIMELINE_DEBUG", "UDP_TREE_EVENT_DEBUG", "PINGPONG_SOURCE",
+        )
+        for key in preset_keys:
+            if key in selected:
+                self.cfg[key] = selected[key]
+        self._transport_dirty = True
+        if hasattr(self, "det_thread") and self.det_thread.isRunning():
+            self.statistic_msg("园区已切换，请停止任务后重新启动")
 
     def setup_stream_resolution_control(self):
         resolution_container = QVBoxLayout()
@@ -2134,6 +2463,16 @@ QPushButton#recordButton[recording="true"] {
         self.latest_raw_frame = frame.copy()
         self.show_image(frame, self.raw_video)
 
+    def handle_left_raw_frame(self, frame):
+        self.latest_raw_frame = frame.copy()
+        self.show_image(frame, self.left_raw_video)
+
+    def handle_right_raw_frame(self, frame):
+        self.show_image(frame, self.right_raw_video)
+
+    def handle_right_detection_finished(self):
+        return None
+
     def handle_detection_finished(self):
         self.streamResolutionCombo.setEnabled(True)
         if self.recording_mode == "camera":
@@ -2160,17 +2499,13 @@ QPushButton#recordButton[recording="true"] {
             self.run_or_continue()
 
     def set_detection_orientation(self, orientation):
-        self.splitter.setOrientation(orientation)
+        self._display_orientation = orientation
         if orientation == Qt.Horizontal:
-            self.label_6.setText("横向检测")
-            self.raw_video.setToolTip("原始画面")
-            self.out_video.setToolTip("检测结果")
-            self.splitter.setSizes([1, 1])
+            self.label_6.setText("横向显示")
         else:
-            self.label_6.setText("纵向检测")
-            self.raw_video.setToolTip("上方：原始画面")
-            self.out_video.setToolTip("下方：检测结果")
-            self.splitter.setSizes([1, 1])
+            self.label_6.setText("纵向显示")
+        if hasattr(self, "videoContainer"):
+            self.refresh_video_layout()
         self.horizontalModeButton.setChecked(orientation == Qt.Horizontal)
         self.verticalModeButton.setChecked(orientation == Qt.Vertical)
         self.refresh_detection_mode_style()
@@ -2225,12 +2560,14 @@ QPushButton:pressed {
         name, _ = QFileDialog.getOpenFileName(self, '选择文件', os.getcwd(), 'Video/Image(*.mp4 *.avi *.jpg *.png)')
         if name:
             self.det_thread.source = name
+            self.cfg["SOURCE"] = name
             self.statistic_msg(f'加载：{os.path.basename(name)}')
             self.stop()
 
     def chose_cam(self):
         self.stop()
         self.det_thread.source = default_camera_source()
+        self.cfg["SOURCE"] = self.det_thread.source
         self.statistic_msg('摄像头模式')
 
     def chose_rtsp(self):
@@ -2240,11 +2577,32 @@ QPushButton:pressed {
 
     def load_rtsp(self, ip):
         self.det_thread.source = ip
+        self.cfg["SOURCE"] = ip
         self.statistic_msg(f'RTSP：{ip}')
         self.rtsp_win.close()
 
+    def _recreate_det_thread_if_needed(self):
+        if (
+            not (self._transport_dirty or self._worker_config_dirty)
+            or self.det_thread.isRunning()
+        ):
+            return
+        old_thread = self.det_thread
+        self.cfg["SOURCE"] = old_thread.source
+        old_thread.jump_out = True
+        if self.right_det_thread is not None:
+            self.right_det_thread.jump_out = True
+            if self.right_det_thread.isRunning():
+                self.right_det_thread.wait(2000)
+            self.right_det_thread.cleanup_resources(stop_gps=True)
+        old_thread.cleanup_resources(stop_gps=True)
+        self._create_det_thread()
+        self._transport_dirty = False
+        self._worker_config_dirty = False
+
     def run_or_continue(self):
         self.camera_reconnect_timer.stop()
+        self._recreate_det_thread_if_needed()
         camera_unavailable = self._is_unavailable_camera_source(self.det_thread.source)
         if camera_unavailable:
             self.statistic_msg(f'摄像头 {self.det_thread.source} 暂不可用，正在等待重连')
@@ -2252,6 +2610,10 @@ QPushButton:pressed {
         self.det_thread.is_continue = True
         if not self.det_thread.isRunning():
             self.det_thread.start()
+        if self.right_det_thread is not None and not self.right_det_thread.isRunning():
+            self.right_det_thread.jump_out = False
+            self.right_det_thread.is_continue = True
+            self.right_det_thread.start()
         if not camera_unavailable:
             self.statistic_msg('运行中')
 
@@ -2277,6 +2639,9 @@ QPushButton:pressed {
             recording_path = self.stop_recording(show_message=False)
         self.det_thread.jump_out = True
         self.det_thread.is_continue = False
+        if self.right_det_thread is not None:
+            self.right_det_thread.jump_out = True
+            self.right_det_thread.is_continue = False
         if recording_path is None:
             self.statistic_msg('已停止')
         else:
@@ -2297,6 +2662,9 @@ QPushButton:pressed {
 
         self.det_thread.jump_out = True
         self.det_thread.is_continue = True
+        if self.right_det_thread is not None:
+            self.right_det_thread.jump_out = True
+            self.right_det_thread.is_continue = True
 
         # 串口接收线程可能早于检测启动，先停止它们再等待检测线程退出。
         for name, receiver in (
@@ -2316,6 +2684,13 @@ QPushButton:pressed {
                 if not self.det_thread.wait(2000):
                     print("⚠️ 检测线程仍未退出，直接结束进程")
                     os._exit(0)
+
+        if self.right_det_thread is not None:
+            if self.right_det_thread.isRunning():
+                if not self.right_det_thread.wait(5000):
+                    self.right_det_thread.terminate()
+                    self.right_det_thread.wait(1000)
+            self.right_det_thread.cleanup_resources(stop_gps=True)
 
         self.det_thread.cleanup_resources(stop_gps=True)
         print("✅ 巡检资源已释放，程序退出")
@@ -2515,8 +2890,11 @@ if __name__ == "__main__":
     # 如果需要命令行覆盖配置，可以在这里解析 args 并更新 CONFIG 字典
     # 例如: python main.py --http-url "http://new-server.com"
     parser = argparse.ArgumentParser()
-    parser.add_argument('--preset', type=str, default=None, choices=PRESET_NAMES,
-                        help='配置方案：client_a(甲方A) | client_b(甲方B) | both(同时对接)')
+    parser.add_argument(
+        '--preset', type=str, default=None,
+        choices=PRESET_NAMES + ORCHARD_NAMES,
+        help='园区配置：恭城柑桔果园 | 兴安葡萄园 | 农科所橘子园（兼容历史键）',
+    )
     parser.add_argument('--data-mode', type=str, default=None, choices=DATA_MODES,
                         help='数据来源：real(全真实) | debug(真实优先/缺失虚拟) | simulation(全虚拟)')
     parser.add_argument('--http-url', type=str, default=None, help='覆盖 HTTP URL')

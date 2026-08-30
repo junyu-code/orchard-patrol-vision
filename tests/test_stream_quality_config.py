@@ -22,18 +22,18 @@ class StreamQualityConfigTests(unittest.TestCase):
         self.assertEqual(config["RTMP_TIME_STANDARD"], "utc+8")
         self.assertEqual(config["UDP_TIME_STANDARD"], "utc+8")
         self.assertEqual(config["UDP_HOST"], "1.14.205.24")
-        self.assertEqual(config["SENSOR_ID"], 2)
+        self.assertEqual(config["SENSOR_ID"], 1)
         self.assertEqual(
             config["RTMP_URL"],
-            "rtmp://gl.xsjny.com/live/robot1_sensor2",
+            "rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor1",
         )
         self.assertEqual(
             config["RTMP_URL_LEFT"],
-            "rtmp://gl.xsjny.com/live/robot1_sensor1",
+            "rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor1",
         )
         self.assertEqual(
             config["RTMP_URL_RIGHT"],
-            "rtmp://gl.xsjny.com/live/robot1_sensor2",
+            "rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor2",
         )
 
     def test_combined_preset_uses_same_source_stream_profile(self):

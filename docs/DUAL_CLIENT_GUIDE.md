@@ -12,16 +12,16 @@
 
 ### 甲方 B（新统一平台）
 - **UDP 数据**: 1.14.205.24:4926
-- **左路 RTMP**: rtmp://gl.xsjny.com/live/robot1_sensor1
-- **右路 RTMP**: rtmp://gl.xsjny.com/live/robot1_sensor2
+- **左路 RTMP**: rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor1
+- **右路 RTMP**: rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor2
 - **管理平台**: https://gl.xsjny.com/web/robot-analysis-ui/#/analytics
 - **大屏**: https://gl.xsjny.com/web/robot-data-view/index.html
 - **协议**: UDP 二进制协议 + RTMP
 
 平台登录凭据保存在本地忽略文件 `config/platform_accounts.local.json`，提交到 GitHub 时只保留 `config/platform_accounts.example.json`。
 
-主程序一个进程对应一个视频源和一路 RTMP。`client_b` 当前默认右路 `sensor2`；
-推左路时将 `RTMP_URL` 改为 `RTMP_URL_LEFT`，并把 `SENSOR_ID` 改为 `1`。
+主程序一个进程对应一个视频源和一路 RTMP。`client_b` 当前默认左路 `sensor1`；
+推右路时将 `RTMP_URL` 改为 `RTMP_URL_RIGHT`，并把 `SENSOR_ID` 改为 `2`。
 左右相机同时在线需要分别启动采集进程，UDP 遥测只应由其中一个进程上报，避免重复数据。`both` 只表示同一个进程同时启用 HTTP 和 UDP，不会自动创建第二路视频采集。
 
 ## 🔧 部署目标选择
@@ -81,9 +81,9 @@ PRESET_CONFIGS = {
     "client_b": {
         "ENABLE_HTTP": False,
         "ENABLE_RTMP": True,
-        "RTMP_URL": "rtmp://gl.xsjny.com/live/robot1_sensor2",
-        "RTMP_URL_LEFT": "rtmp://gl.xsjny.com/live/robot1_sensor1",
-        "RTMP_URL_RIGHT": "rtmp://gl.xsjny.com/live/robot1_sensor2",
+        "RTMP_URL": "rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor1",
+        "RTMP_URL_LEFT": "rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor1",
+        "RTMP_URL_RIGHT": "rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor2",
         "ENABLE_UDP": True,
         "UDP_HOST": "1.14.205.24",
         "UDP_PORT": 4926,
@@ -174,7 +174,7 @@ UDP 北京时间 `HH:MM:SS` 对齐。
 2. **RTMP推流**: 访问管理平台
    - URL: https://gl.xsjny.com/web/robot-analysis-ui/#/analytics
    - 账号密码见本地 `config/platform_accounts.local.json`
-   - 查看左路 `robot1_sensor1` 或右路 `robot1_sensor2` 视频流
+   - 查看左路 `vineyard1_robot1_sensor1` 或右路 `vineyard1_robot1_sensor2` 视频流
 
 ## ⚙️ 高级配置
 
@@ -189,9 +189,9 @@ CONFIG = {
 ```
 
 对应的推流地址会是：
-- robot1_sensor1
-- robot2_sensor1
-- robot3_sensor2
+- vineyard1_robot1_sensor1
+- vineyard1_robot2_sensor1
+- vineyard1_robot3_sensor2
 
 ### 调整发送频率
 

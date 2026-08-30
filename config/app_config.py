@@ -10,16 +10,75 @@ from copy import deepcopy
 from transport.camera_capabilities import default_camera_source
 
 
+# 界面显示名称与历史命令行预设的映射。保留旧键，避免已有脚本失效。
+ORCHARD_NAMES = (
+    "恭城柑桔果园",
+    "兴安葡萄园",
+    "农科所橘子园",
+)
+ORCHARD_PRESET_KEYS = {
+    "恭城柑桔果园": "client_a",
+    "兴安葡萄园": "client_b",
+    "农科所橘子园": "client_b",
+}
+
+
+# 每个园区的地址目录。列表项同时保存展示文字和运行时所需字段，界面无需解析地址字符串。
+ORCHARD_ENDPOINTS = {
+    "恭城柑桔果园": {
+        "HTTP": (
+            {
+                "label": "柑桔平台 HTTP",
+                "url": "https://api.jdpm.hhzzss.cn/agriculture/position/robotPost",
+            },
+        ),
+        "UDP": (
+            {"label": "旧平台 UDP（43.139.69.203:10088）", "host": "43.139.69.203", "port": 10088},
+        ),
+        "RTMP": (
+            {
+                "label": "自定义 RTMP（可编辑）",
+                "url": os.getenv("CLIENT_A_RTMP_URL", ""),
+            },
+        ),
+    },
+    "兴安葡萄园": {
+        "HTTP": (),
+        "UDP": (
+            {"label": "统一平台 UDP（1.14.205.24:4926）", "host": "1.14.205.24", "port": 4926},
+        ),
+        "RTMP": tuple(
+            {"label": name, "url": url}
+            for name, url in (
+                ("左路视频", "rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor1"),
+                ("右路视频", "rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor2"),
+            )
+        ),
+    },
+    "农科所橘子园": {
+        "HTTP": (),
+        "UDP": (
+            {"label": "统一平台 UDP（1.14.205.24:4926）", "host": "1.14.205.24", "port": 4926},
+        ),
+        # 与葡萄园共用服务器，仅去掉 vineyard1_ 前缀。
+        "RTMP": tuple(
+            {"label": name, "url": url}
+            for name, url in (
+                ("左路视频", "rtmp://gl.xsjny.com/live/robot1_sensor1"),
+                ("右路视频", "rtmp://gl.xsjny.com/live/robot1_sensor2"),
+            )
+        ),
+    },
+}
+
+
 # 数据来源总开关：real | debug | simulation；默认调试模式
 DATA_MODE = "debug"
 
 
-# 平台入口备忘：
-# 甲方A平台：https://judaonongye.hhzzss.cn/index
-# 甲方A本地凭据：CLIENT_A_USERNAME / CLIENT_A_PASSWORD 或 config/platform_accounts.local.json
-# 甲方B管理平台：https://gl.xsjny.com/web/robot-analysis-ui/#/analytics
-# 甲方B大屏：https://gl.xsjny.com/web/robot-data-view/index.html
-# 甲方B本地凭据：CLIENT_B_USERNAME / CLIENT_B_PASSWORD 或 config/platform_accounts.local.json
+# 平台入口备忘：地址目录已按园区维护；历史账号键仍在 platform_accounts.local.json 中兼容保留。
+# 恭城柑桔果园平台：https://judaonongye.hhzzss.cn/index
+# 兴安葡萄园/农科所橘子园统一平台：https://gl.xsjny.com/web/robot-analysis-ui/#/analytics
 
 # 预设配置方案：方便在不同甲方之间切换
 PRESET_CONFIGS = {
@@ -42,11 +101,11 @@ PRESET_CONFIGS = {
         "ENABLE_HTTP": False,
         "HTTP_URL": "",
         "ENABLE_RTMP": True,
-        # 当前进程推右路；左路可改用 RTMP_URL_LEFT 或 --rtmp-url 覆盖。
-        "RTMP_URL": "rtmp://gl.xsjny.com/live/robot1_sensor2",
-        "RTMP_URL_LEFT": "rtmp://gl.xsjny.com/live/robot1_sensor1",
-        "RTMP_URL_RIGHT": "rtmp://gl.xsjny.com/live/robot1_sensor2",
-        "SENSOR_ID": 2,
+        # 当前进程推左路；右路可改用 RTMP_URL_RIGHT 或 --rtmp-url 覆盖。
+        "RTMP_URL": "rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor1",
+        "RTMP_URL_LEFT": "rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor1",
+        "RTMP_URL_RIGHT": "rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor2",
+        "SENSOR_ID": 1,
         "ENABLE_UDP": True,
         "UDP_HOST": "1.14.205.24",
         "UDP_PORT": 4926,
@@ -126,7 +185,10 @@ PRESET_NAMES = tuple(PRESET_CONFIGS.keys())
 
 BASE_CONFIG = {
     "PRESET_NAME": ACTIVE_PRESET,
+    "ORCHARD_NAME": "兴安葡萄园" if ACTIVE_PRESET == "client_b" else "恭城柑桔果园",
     "DATA_MODE": DATA_MODE,
+    "DATA_PROTOCOL": "UDP" if ACTIVE_PRESET == "client_b" else "HTTP",
+    "VIDEO_PROTOCOL": "RTMP",
 
     # 旧病害发送串口；当前主流程不向电控返回数据
     "ENABLE_SERIAL": False,
@@ -165,6 +227,8 @@ BASE_CONFIG = {
     # YOLO 模型配置
     "WEIGHTS": "./pt/best.pt",
     "SOURCE": default_camera_source(),
+    "CAMERA_SOURCE_LEFT": default_camera_source(),
+    "CAMERA_SOURCE_RIGHT": "",
     "CONF_THRES": 0.8,
     "IOU_THRES": 0.45,
     "IMG_SIZE": 640,
@@ -213,8 +277,35 @@ BASE_CONFIG = {
 
 def build_config(preset_name=None):
     """构建运行配置，避免外部直接修改全局模板。"""
-    active_preset = preset_name or ACTIVE_PRESET
+    requested_name = preset_name or ACTIVE_PRESET
+    # 新界面使用园区中文名称；历史 client_* 键继续支持命令行和旧脚本。
+    active_preset = ORCHARD_PRESET_KEYS.get(requested_name, requested_name)
     config = deepcopy(BASE_CONFIG)
     config.update(PRESET_CONFIGS.get(active_preset, PRESET_CONFIGS["client_a"]))
     config["PRESET_NAME"] = active_preset
+    config["DATA_PROTOCOL"] = "HTTP" if config.get("ENABLE_HTTP") else "UDP"
+    config["VIDEO_PROTOCOL"] = "RTMP" if config.get("ENABLE_RTMP") else "NONE"
+    if requested_name in ORCHARD_NAMES:
+        config["ORCHARD_NAME"] = requested_name
+        endpoint_config = ORCHARD_ENDPOINTS[requested_name]
+        data_protocol = config["DATA_PROTOCOL"]
+        data_endpoint = endpoint_config.get(data_protocol, ())
+        if data_endpoint:
+            selected_data = data_endpoint[0]
+            if data_protocol == "HTTP":
+                config["HTTP_URL"] = selected_data.get("url", "")
+            elif data_protocol == "UDP":
+                config["UDP_HOST"] = selected_data.get("host", "")
+                config["UDP_PORT"] = int(selected_data.get("port", 0) or 0)
+        video_endpoint = endpoint_config.get("RTMP", ())
+        if video_endpoint:
+            config["RTMP_URL"] = video_endpoint[0].get("url", "")
+        if not config.get("RTMP_URL"):
+            # 恭城果园的图片随 HTTP JSON 上传，没有独立 RTMP 视频流。
+            config["ENABLE_RTMP"] = False
+            config["VIDEO_PROTOCOL"] = "NONE"
+    elif active_preset == "client_b":
+        config["ORCHARD_NAME"] = "兴安葡萄园"
+    else:
+        config["ORCHARD_NAME"] = "恭城柑桔果园"
     return config
