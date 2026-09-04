@@ -17,7 +17,7 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_VIDEO = ROOT_DIR / "samples" / "videos" / "robot_push" / "test0_push.mp4"
-DEFAULT_RTMP_URL = "rtmp://gl.xsjny.com/live/robot1_sensor2"
+DEFAULT_RTMP_URL = "rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor1"
 LOG_DIR = ROOT_DIR / "logs"
 
 PROFILES = [

@@ -21,9 +21,10 @@
 - GPS 速度缺失时的连续坐标估算、异常过滤和平滑
 - 实时遥测 UI、原始画面录像和程序窗口录像
 - 果树 ID、GPS、速度、方向、电池等巡检数据模拟
-- 园区、数据协议、视频协议和相机输入快速切换
+- 园区、数据协议和视频协议快速切换
 - 左右双路相机采集、原图/检测结果四格显示
 - 可单独启用或禁用 YOLOv5 模型检测
+- 双路 HID POS 条码标签读取，按硬件序列号固定左/右果树编号
 
 ## 目录结构
 
@@ -41,6 +42,7 @@ orchard-patrol-vision/
 │  ├─ telemetry_serial_receiver.py # 统一遥测串口接收与重连
 │  ├─ data_mode.py                 # 真实/调试/仿真数据策略
 │  ├─ gps_serial_receiver.py       # 旧 OPGPS 串口兼容接收
+│  ├─ hid_pos_receiver.py           # 双路 HID POS 标签读取与左右绑定
 │  ├─ robot_protocol.py            # 甲方 B UDP 数据包协议
 │  ├─ patrol_timeline.py           # 甲方 B 巡检果树时间轴
 │  ├─ virtual_sensor.py            # GPS、速度、方向、电池等虚拟传感器
@@ -101,6 +103,10 @@ Windows 下也可以直接使用当前 Conda 环境解释器：
 & D:/Anaconda3/envs/yolov5_pyqt5/python.exe "C:/05Projects/Python/orchard-patrol-vision/main.py"
 ```
 
+### 双路 HID POS 标签
+
+当前默认绑定为：左侧 `AB031246`，右侧 `AB030000`。两台 ADL622/EM22 必须设置为纯 HID POS 模式（Windows 设备管理器中为 `PID=0010`），程序通过 Windows POS API 或 Linux hidraw 接收扫码数据，不占用下位机串口。默认标签可使用图片中的纯数字格式，例如 `214`；详细安装、Linux udev 权限和故障排查见 `docs/HID_TAG_SCANNERS.md`。
+
 ### 3. 启动甲方 B 演示
 
 ```bat
@@ -147,7 +153,7 @@ python main.py --preset "农科所橘子园"
 
 历史 `client_a`、`client_b`、`both` 参数继续兼容。启动后可在界面中配置：
 
-- 左路和右路相机输入；未选择右路时只显示左路
+- 左路和右路相机固定绑定（Windows 设备号 0/1，Linux `/dev/video0`/`/dev/video1`）
 - 横向或纵向显示原图、检测结果
 - 模型检测开关；关闭后仍可进行原始视频采集和推流
 - 视频输出分辨率、帧率和对应 RTMP 地址
