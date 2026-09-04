@@ -7,7 +7,7 @@
 import os
 from copy import deepcopy
 
-from transport.camera_capabilities import default_camera_source
+from transport.camera_capabilities import default_camera_source, secondary_camera_source
 
 
 # 界面显示名称与历史命令行预设的映射。保留旧键，避免已有脚本失效。
@@ -105,11 +105,12 @@ PRESET_CONFIGS = {
         "RTMP_URL": "rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor1",
         "RTMP_URL_LEFT": "rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor1",
         "RTMP_URL_RIGHT": "rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor2",
+        "ROBOT_ID": 1,
         "SENSOR_ID": 1,
         "ENABLE_UDP": True,
         "UDP_HOST": "1.14.205.24",
         "UDP_PORT": 4926,
-        "UDP_ORCHARD_ID": "orchard1",
+        "UDP_ORCHARD_ID": "vineyard1",
         "UDP_ADD_ORCHARD_PREFIX": True,
         "RAW_STREAM_ONLY": True,
         "SIMULATE_TREE_EVENTS": False,
@@ -224,11 +225,26 @@ BASE_CONFIG = {
     "GPS_EVENT_LOG_DIR": "./result/gps_events",
     "GPS_EVENT_LOG_RETENTION_DAYS": 3,
 
+    # 双路 EM22 HID POS 标签扫描器；序列号用于固定左右，不依赖 USB 枚举顺序
+    "ENABLE_HID_TAG_SCANNERS": True,
+    "HID_TAG_VENDOR_ID": 0x1EAB,
+    "HID_TAG_PRODUCT_ID": 0x0010,
+    "HID_TAG_LEFT_SERIAL": os.getenv("HID_TAG_LEFT_SERIAL", "AB031246"),
+    "HID_TAG_RIGHT_SERIAL": os.getenv("HID_TAG_RIGHT_SERIAL", "AB030000"),
+    "USE_HID_TAG_TREE_IDS": True,
+    "HID_TAG_STALE_TIMEOUT": 3.0,
+    "HID_TAG_DUPLICATE_INTERVAL": 0.3,
+    "HID_TAG_RECONNECT_INTERVAL": 2.0,
+    "HID_TAG_POLL_INTERVAL": 0.01,
+    "HID_TAG_ENCODING": "utf-8",
+    "HID_TAG_PATTERN": r"^(?:TREE[:_-]?)?(?P<tree_id>\d{1,5})$",
+
     # YOLO 模型配置
     "WEIGHTS": "./pt/best.pt",
     "SOURCE": default_camera_source(),
-    "CAMERA_SOURCE_LEFT": default_camera_source(),
-    "CAMERA_SOURCE_RIGHT": "",
+    # 双路相机固定绑定：左路设备 0，右路设备 1；Linux 对应 /dev/video0、/dev/video1
+    "CAMERA_SOURCE_LEFT": os.getenv("CAMERA_LEFT_SOURCE", default_camera_source()),
+    "CAMERA_SOURCE_RIGHT": os.getenv("CAMERA_RIGHT_SOURCE", secondary_camera_source()),
     "CONF_THRES": 0.8,
     "IOU_THRES": 0.45,
     "IMG_SIZE": 640,
@@ -283,6 +299,8 @@ def build_config(preset_name=None):
     config = deepcopy(BASE_CONFIG)
     config.update(PRESET_CONFIGS.get(active_preset, PRESET_CONFIGS["client_a"]))
     config["PRESET_NAME"] = active_preset
+    # 主检测线程使用固定绑定的左路设备。
+    config["SOURCE"] = config.get("CAMERA_SOURCE_LEFT", default_camera_source())
     config["DATA_PROTOCOL"] = "HTTP" if config.get("ENABLE_HTTP") else "UDP"
     config["VIDEO_PROTOCOL"] = "RTMP" if config.get("ENABLE_RTMP") else "NONE"
     if requested_name in ORCHARD_NAMES:

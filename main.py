@@ -79,7 +79,6 @@ from utils.CustomMessageBox import MessageBox
 from utils.general import check_img_size, check_imshow, non_max_suppression, scale_coords
 from utils.plots import colors
 from utils.torch_utils import select_device
-from utils.capnums import Camera
 from dialog.rtsp_win import Window
 
 try:
@@ -199,6 +198,18 @@ except ImportError as e:
     FLAG_FAULT = 0x0200
     TelemetrySnapshot = None
     TelemetrySerialReceiver = None
+
+try:
+    from transport.hid_pos_receiver import (
+        DualHidPosReceiver,
+        HidTagSnapshot,
+        select_tree_id_data,
+    )
+except ImportError as e:
+    print(f"⚠️ HID POS 标签模块未找到: {e}")
+    DualHidPosReceiver = None
+    HidTagSnapshot = None
+    select_tree_id_data = None
 
 warnings.filterwarnings('ignore')
 
@@ -472,6 +483,7 @@ class DetThread(QThread):
         self.udp_sender = None
         self.telemetry_receiver = None
         self.gps_receiver = None
+        self.hid_tag_receiver = None
         self.gps_event_logger = None
         self.dataset = None
         self.vid_cap = None
@@ -501,7 +513,7 @@ class DetThread(QThread):
         self.udp_send_interval = 1.0  # UDP 发送间隔（秒）
         self.udp_send_count = 0
         self.last_missing_telemetry_log_time = 0
-        self.last_real_tree_state = None
+        self.last_tree_state = None
         self.patrol_timeline = self._build_patrol_timeline()
         # -----------------------------
 
@@ -613,6 +625,34 @@ class DetThread(QThread):
         elif self.cfg.get("ENABLE_GPS_SERIAL") and self.data_policy.use_virtual_gps:
             print("ℹ️ 仿真模式：忽略 GPS 串口配置，位置使用虚拟数据")
 
+        # 标签扫描器使用 HID POS，不占用下位机、GPS 或病害发送串口。
+        if not self.data_policy.force_virtual and self.cfg.get("ENABLE_HID_TAG_SCANNERS"):
+            if DualHidPosReceiver is None:
+                print("❌ HID POS 标签模块未加载，请确认已经安装 hidapi")
+            else:
+                try:
+                    self.hid_tag_receiver = DualHidPosReceiver(
+                        left_serial=self.cfg.get("HID_TAG_LEFT_SERIAL", ""),
+                        right_serial=self.cfg.get("HID_TAG_RIGHT_SERIAL", ""),
+                        vendor_id=self.cfg.get("HID_TAG_VENDOR_ID", 0x1EAB),
+                        product_id=self.cfg.get("HID_TAG_PRODUCT_ID", 0x0010),
+                        stale_timeout=self.cfg.get("HID_TAG_STALE_TIMEOUT", 3.0),
+                        duplicate_interval=self.cfg.get(
+                            "HID_TAG_DUPLICATE_INTERVAL", 0.3
+                        ),
+                        reconnect_interval=self.cfg.get(
+                            "HID_TAG_RECONNECT_INTERVAL", 2.0
+                        ),
+                        poll_interval=self.cfg.get("HID_TAG_POLL_INTERVAL", 0.01),
+                        encoding=self.cfg.get("HID_TAG_ENCODING", "utf-8"),
+                        tag_pattern=self.cfg.get("HID_TAG_PATTERN"),
+                    )
+                except Exception as e:
+                    print(f"❌ HID POS 标签接收器初始化失败: {e}")
+                    self.hid_tag_receiver = None
+        elif self.cfg.get("ENABLE_HID_TAG_SCANNERS"):
+            print("ℹ️ 仿真模式：忽略 HID POS 标签扫描器配置")
+
         # 2. 初始化 HTTP
         if self.cfg["ENABLE_HTTP"] and HttpSender is not None:
             if self.cfg["HTTP_URL"]:
@@ -706,11 +746,13 @@ class DetThread(QThread):
         return timeline
 
     def _start_data_receivers(self):
-        """按需启动真实遥测和旧 GPS 接收线程。"""
+        """按需启动真实遥测、旧 GPS 和 HID 标签接收线程。"""
         if self.telemetry_receiver and not self.telemetry_receiver.is_running:
             self.telemetry_receiver.start()
         if self.gps_receiver and not self.gps_receiver.is_running:
             self.gps_receiver.start()
+        if self.hid_tag_receiver and not self.hid_tag_receiver.is_running:
+            self.hid_tag_receiver.start()
 
     def _get_frame_telemetry_snapshot(self):
         """每个处理帧只读取一次统一电控遥测。"""
@@ -726,6 +768,14 @@ class DetThread(QThread):
             if self.gps_receiver:
                 return self.gps_receiver.get_snapshot()
             return GpsSnapshot.empty() if GpsSnapshot is not None else None
+        return None
+
+    def _get_frame_hid_tag_snapshot(self):
+        """每个处理帧读取一次双路 HID 标签快照。"""
+        if not self.data_policy.force_virtual and self.cfg.get("ENABLE_HID_TAG_SCANNERS"):
+            if self.hid_tag_receiver:
+                return self.hid_tag_receiver.get_snapshot()
+            return HidTagSnapshot.empty() if HidTagSnapshot is not None else None
         return None
 
     @staticmethod
@@ -811,6 +861,9 @@ class DetThread(QThread):
             if self.gps_receiver:
                 try: self.gps_receiver.stop()
                 except: pass
+            if self.hid_tag_receiver:
+                try: self.hid_tag_receiver.stop()
+                except: pass
         if self.serial_sender:
             try: self.serial_sender.close_serial()
             except: pass
@@ -847,7 +900,8 @@ class DetThread(QThread):
             f"RTMP: {'✅' if self.rtmp_sender else '❌'} | "
             f"UDP: {'✅' if self.udp_sender else '❌'} | "
             f"遥测: {'✅' if self.telemetry_receiver else '❌'} | "
-            f"旧GPS: {'✅' if self.gps_receiver else '❌'}"
+            f"旧GPS: {'✅' if self.gps_receiver else '❌'} | "
+            f"HID标签: {'✅' if self.hid_tag_receiver else '❌'}"
         )
         if self.data_policy.use_real_telemetry and self.cfg.get("ENABLE_TELEMETRY_SERIAL"):
             print(
@@ -858,6 +912,12 @@ class DetThread(QThread):
             print(
                 f"   GPS串口: {self.cfg.get('GPS_SERIAL_PORT') or 'AUTO'} @ "
                 f"{self.cfg.get('GPS_SERIAL_BAUDRATE', 9600)}"
+            )
+        if self.hid_tag_receiver:
+            print(
+                "   HID标签: "
+                f"左={self.cfg.get('HID_TAG_LEFT_SERIAL')} | "
+                f"右={self.cfg.get('HID_TAG_RIGHT_SERIAL')}"
             )
         print("="*50)
         
@@ -1069,6 +1129,7 @@ class DetThread(QThread):
                 # 每个处理帧只读取一次硬件快照，所有平台和 UI 共用同一份数据
                 telemetry_snapshot = self._get_frame_telemetry_snapshot()
                 legacy_gps_snapshot = self._get_frame_gps_snapshot()
+                hid_tag_snapshot = self._get_frame_hid_tag_snapshot()
                 frame_gps_snapshot = self._select_real_gps_snapshot(
                     telemetry_snapshot,
                     legacy_gps_snapshot,
@@ -1080,7 +1141,34 @@ class DetThread(QThread):
                     and getattr(telemetry_snapshot, "valid", False)
                 ):
                     real_tree_data = telemetry_snapshot.to_tree_data()
-                tree_event = real_tree_data if real_tree_data is not None else timeline_tree_event
+                base_tree_event = (
+                    real_tree_data if real_tree_data is not None else timeline_tree_event
+                )
+                use_hid_tag_tree_ids = bool(
+                    self.cfg.get("USE_HID_TAG_TREE_IDS", False)
+                )
+                hid_tag_active = bool(
+                    use_hid_tag_tree_ids
+                    and hid_tag_snapshot
+                    and getattr(hid_tag_snapshot, "has_valid_tag", False)
+                )
+                if use_hid_tag_tree_ids and select_tree_id_data is not None:
+                    tree_event = select_tree_id_data(
+                        base_tree_event,
+                        hid_tag_snapshot,
+                        use_hid_tags=True,
+                    )
+                elif use_hid_tag_tree_ids:
+                    tree_event = {
+                        "current_tree_id": 0,
+                        "left_tree_id": 0,
+                        "right_tree_id": 0,
+                        "camera_side": 0,
+                        "source": "hid_pos",
+                    }
+                else:
+                    # 关闭二维码来源时保留下位机数据；无真实遥测时允许仿真时间轴工作。
+                    tree_event = base_tree_event
                 tree_present = bool(
                     tree_event
                     and (
@@ -1089,20 +1177,23 @@ class DetThread(QThread):
                         or tree_event.get("right_tree_id")
                     )
                 )
-                tree_state_changed = False
+                tree_state = (
+                    int(tree_event.get("current_tree_id", 0) or 0),
+                    int(tree_event.get("left_tree_id", 0) or 0),
+                    int(tree_event.get("right_tree_id", 0) or 0),
+                    int(tree_event.get("camera_side", 0) or 0),
+                ) if tree_event else (0, 0, 0, 0)
+                tree_state_changed = tree_state != self.last_tree_state
+                self.last_tree_state = tree_state
                 explicit_tree_indices = None
-                if real_tree_data is not None:
-                    tree_state = (
-                        real_tree_data["current_tree_id"],
-                        real_tree_data["left_tree_id"],
-                        real_tree_data["right_tree_id"],
-                        real_tree_data["camera_side"],
-                    )
-                    tree_state_changed = tree_state != self.last_real_tree_state
-                    self.last_real_tree_state = tree_state
+                if tree_event is not None and (
+                    real_tree_data is not None
+                    or hid_tag_active
+                    or use_hid_tag_tree_ids
+                ):
                     explicit_tree_indices = (
-                        real_tree_data["left_tree_id"],
-                        real_tree_data["right_tree_id"],
+                        tree_event.get("left_tree_id", 0),
+                        tree_event.get("right_tree_id", 0),
                     )
 
                 if self.sensor_sim and (
@@ -1259,8 +1350,11 @@ class DetThread(QThread):
                         ),
                         "fault": status_sources.get("fault_code", "unavailable"),
                         "tree": (
-                            "real" if real_tree_data is not None
-                            else "virtual" if timeline_tree_event
+                            "real"
+                            if hid_tag_active
+                            or (real_tree_data is not None and not use_hid_tag_tree_ids)
+                            else "virtual"
+                            if timeline_tree_event and not use_hid_tag_tree_ids
                             else "unavailable"
                         ),
                         "work_mode": "real",
@@ -1275,6 +1369,7 @@ class DetThread(QThread):
                         "UDP": bool(self.udp_sender),
                         "遥测": bool(self.telemetry_receiver),
                         "旧GPS": bool(self.gps_receiver),
+                        "HID标签": bool(self.hid_tag_receiver),
                     },
                 })
 
@@ -1480,7 +1575,7 @@ class MainWindow(QMainWindow, Ui_mainWindow):
         self.setup_compact_left_panel()
         self.setup_recording_controls()
         self.setup_transport_controls()
-        self.setup_camera_source_controls()
+        self.setup_tree_id_source_control()
         self.setup_multi_camera_display()
         self.setup_model_detection_control()
 
@@ -1513,7 +1608,9 @@ class MainWindow(QMainWindow, Ui_mainWindow):
             self.det_thread.weights = (
                 f"./pt/{self.model_type}" if self.pt_list else self.cfg["WEIGHTS"]
             )
-        self.det_thread.source = self.cfg["SOURCE"]
+        self.det_thread.source = self.cfg.get(
+            "CAMERA_SOURCE_LEFT", self.cfg["SOURCE"]
+        )
         self.det_thread.percent_length = self.progressBar.maximum()
         self.det_thread.send_raw.connect(self.handle_left_raw_frame)
         self.det_thread.send_img.connect(lambda x: self.show_image(x, self.left_detect_video))
@@ -1543,6 +1640,7 @@ class MainWindow(QMainWindow, Ui_mainWindow):
                 "ENABLE_SERIAL": False,
                 "ENABLE_TELEMETRY_SERIAL": False,
                 "ENABLE_GPS_SERIAL": False,
+                "ENABLE_HID_TAG_SCANNERS": False,
                 "ENABLE_PATROL_TIMELINE": False,
             }
         )
@@ -1559,6 +1657,11 @@ class MainWindow(QMainWindow, Ui_mainWindow):
 
     def start_background_data_receivers(self):
         """窗口启动后立即接收真实数据，不要求先启动检测。"""
+        print(
+            "📷 双路相机固定绑定: "
+            f"左={self.cfg.get('CAMERA_SOURCE_LEFT', self.cfg.get('SOURCE'))} | "
+            f"右={self.cfg.get('CAMERA_SOURCE_RIGHT', '') or '未配置'}"
+        )
         self.det_thread._start_data_receivers()
         messages = []
         if self.det_thread.telemetry_receiver:
@@ -1571,12 +1674,16 @@ class MainWindow(QMainWindow, Ui_mainWindow):
                 f"旧GPS {self.cfg.get('GPS_SERIAL_PORT') or 'AUTO'} @ "
                 f"{self.cfg.get('GPS_SERIAL_BAUDRATE', 9600)}"
             )
+        if self.det_thread.hid_tag_receiver:
+            messages.append(
+                f"HID标签 左={self.cfg.get('HID_TAG_LEFT_SERIAL')} "
+                f"右={self.cfg.get('HID_TAG_RIGHT_SERIAL')}"
+            )
         if messages:
-            self.statistic_msg("串口接收中: " + " | ".join(messages))
+            self.statistic_msg("硬件数据接收中: " + " | ".join(messages))
 
     def bind_signals(self):
         self.fileButton.clicked.connect(self.open_file)
-        self.cameraButton.clicked.connect(self.chose_cam)
         self.rtspButton.clicked.connect(self.chose_rtsp)
         self.runButton.clicked.connect(self.run_or_continue)
         self.stopButton.clicked.connect(self.stop)
@@ -1590,6 +1697,9 @@ class MainWindow(QMainWindow, Ui_mainWindow):
 
     def setup_compact_left_panel(self):
         apply_readable_combo_style(self.comboBox)
+        # 双路摄像头已经固定绑定左右设备，不再提供可切换的单路相机按钮。
+        self.horizontalLayout_8.removeWidget(self.cameraButton)
+        self.cameraButton.hide()
         self.label_27.hide()
         self.label_28.hide()
         for widget in (self.label_8, self.checkBox, self.rateSpinBox, self.rateSlider, self.saveCheckBox):
@@ -1900,91 +2010,61 @@ QListWidget{
         self.orchardCombo.currentIndexChanged.connect(self.change_orchard)
         self.verticalLayout_8.insertLayout(2, transport_layout)
 
-    def setup_camera_source_controls(self):
-        """Add left/right camera selectors below the stream quality controls."""
-        source_layout = QVBoxLayout()
-        source_layout.setSpacing(4)
-        source_layout.setContentsMargins(0, 2, 7, 0)
-        title = QLabel("相机输入", self.groupBox_8)
-        title.setStyleSheet(
-            'QLabel { color: rgb(218, 218, 218); font: bold 16px "Microsoft YaHei"; }'
+    def setup_tree_id_source_control(self):
+        """在相机设置下提供果树 ID 来源切换。"""
+        self.hidTagTreeIdButton = QPushButton(self.groupBox_8)
+        self.hidTagTreeIdButton.setObjectName("hidTagTreeIdButton")
+        self.hidTagTreeIdButton.setCheckable(True)
+        self.hidTagTreeIdButton.setChecked(
+            bool(self.cfg.get("USE_HID_TAG_TREE_IDS", False))
         )
-        source_layout.addWidget(title)
-
-        try:
-            _count, detected = Camera().get_cam_num()
-        except Exception:
-            detected = []
-        camera_items = [(f"摄像头 {index}", str(index)) for index in detected]
-        if not camera_items:
-            camera_items = [("默认摄像头", str(default_camera_source()))]
-
-        def add_camera_row(label_text, object_name, allow_none=False):
-            row = QHBoxLayout()
-            row.setSpacing(8)
-            label = QLabel(label_text, self.groupBox_8)
-            label.setMinimumWidth(92)
-            label.setMaximumWidth(92)
-            label.setStyleSheet(
-                'QLabel { color: rgb(218, 218, 218); font: bold 16px "Microsoft YaHei"; }'
-            )
-            combo = PopupAwareComboBox(self.groupBox_8)
-            combo.setObjectName(object_name)
-            combo.setMinimumHeight(35)
-            combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            apply_readable_combo_style(combo)
-            if allow_none:
-                combo.addItem("不启用", "")
-            for text, value in camera_items:
-                combo.addItem(text, value)
-            row.addWidget(label)
-            row.addWidget(combo, 1)
-            source_layout.addLayout(row)
-            return combo
-
-        self.leftCameraCombo = add_camera_row("左路相机", "leftCameraCombo")
-        self.rightCameraCombo = add_camera_row(
-            "右路相机", "rightCameraCombo", allow_none=True
+        self.hidTagTreeIdButton.setMinimumHeight(30)
+        self.hidTagTreeIdButton.setCursor(Qt.PointingHandCursor)
+        self.hidTagTreeIdButton.setToolTip(
+            "启用后，左右果树 ID 只使用二维码识别设备的扫描结果；"
+            "未扫到时为 0，不读取下位机树号"
         )
-        left_source = str(
-            self.cfg.get("CAMERA_SOURCE_LEFT") or self.cfg.get("SOURCE") or camera_items[0][1]
+        self.hidTagTreeIdButton.setStyleSheet("""
+QPushButton#hidTagTreeIdButton {
+    background-color: rgba(68, 126, 85, 185);
+    border: 1px solid rgba(157, 195, 165, 150);
+    border-radius: 4px;
+    color: #edf5ee;
+    font: bold 14px "Microsoft YaHei";
+    padding: 0 10px;
+}
+QPushButton#hidTagTreeIdButton:checked {
+    background-color: rgba(68, 126, 85, 185);
+}
+QPushButton#hidTagTreeIdButton:!checked {
+    background-color: rgba(202, 215, 205, 28);
+    border-color: rgba(171, 194, 177, 82);
+    color: #d6ded8;
+}
+QPushButton#hidTagTreeIdButton:hover {
+    background-color: rgba(78, 143, 96, 205);
+}
+""")
+        self._update_tree_id_source_button_text(
+            self.hidTagTreeIdButton.isChecked()
         )
-        right_source = str(self.cfg.get("CAMERA_SOURCE_RIGHT", "") or "")
-        if left_source and self.leftCameraCombo.findData(left_source) < 0:
-            self.leftCameraCombo.addItem(left_source, left_source)
-        if right_source and self.rightCameraCombo.findData(right_source) < 0:
-            self.rightCameraCombo.addItem(right_source, right_source)
-        left_index = self.leftCameraCombo.findData(left_source)
-        self.leftCameraCombo.setCurrentIndex(max(0, left_index))
-        right_index = self.rightCameraCombo.findData(right_source)
-        if len(camera_items) > 1 and not right_source:
-            right_index = 2
-        self.rightCameraCombo.setCurrentIndex(max(0, right_index))
-        self.cfg["CAMERA_SOURCE_LEFT"] = str(self.leftCameraCombo.currentData() or "")
-        self.cfg["CAMERA_SOURCE_RIGHT"] = str(self.rightCameraCombo.currentData() or "")
-        if self.cfg["CAMERA_SOURCE_LEFT"]:
-            self.cfg["SOURCE"] = self.cfg["CAMERA_SOURCE_LEFT"]
-        self.leftCameraCombo.currentIndexChanged.connect(self.change_camera_source)
-        self.rightCameraCombo.currentIndexChanged.connect(self.change_camera_source)
-        self.verticalLayout_8.insertLayout(3, source_layout)
+        self.hidTagTreeIdButton.toggled.connect(self.change_tree_id_source)
+        self.verticalLayout_8.insertWidget(4, self.hidTagTreeIdButton)
 
-    def change_camera_source(self, _index):
-        self.cfg["CAMERA_SOURCE_LEFT"] = str(self.leftCameraCombo.currentData() or "")
-        self.cfg["CAMERA_SOURCE_RIGHT"] = str(self.rightCameraCombo.currentData() or "")
-        if self.cfg["CAMERA_SOURCE_LEFT"]:
-            self.cfg["SOURCE"] = self.cfg["CAMERA_SOURCE_LEFT"]
-        self._worker_config_dirty = True
-        if hasattr(self, "videoContainer"):
-            self.refresh_video_layout()
-        if hasattr(self, "det_thread"):
-            if self.right_det_thread is not None and self.right_det_thread.isRunning():
-                self.right_det_thread.jump_out = True
-                self.right_det_thread.wait(2000)
-            if self.right_det_thread is not None:
-                self.right_det_thread.cleanup_resources(stop_gps=True)
-            self._create_right_det_thread()
-        if hasattr(self, "det_thread") and self.det_thread.isRunning():
-            self.statistic_msg("相机输入已更新，请停止任务后重新启动")
+    def _update_tree_id_source_button_text(self, enabled):
+        """根据当前选择更新二维码识别设备按钮文案。"""
+        self.hidTagTreeIdButton.setText(
+            "停止使用二维码识别设备扫描"
+            if enabled
+            else "使用二维码识别设备扫描"
+        )
+
+    def change_tree_id_source(self, enabled):
+        """切换果树 ID 来源；工作线程会从下一帧起使用新配置。"""
+        self.cfg["USE_HID_TAG_TREE_IDS"] = bool(enabled)
+        self._update_tree_id_source_button_text(enabled)
+        source = "二维码识别设备扫描" if enabled else "下位机遥测"
+        self.statistic_msg(f"果树 ID 来源已切换为{source}")
 
     def setup_multi_camera_display(self):
         """Replace the legacy two-way splitter with a four-cell camera grid."""
@@ -2010,6 +2090,7 @@ QListWidget{
 
     def _make_video_label(self, placeholder):
         label = QLabel(self.videoContainer)
+        label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         label.setMinimumSize(200, 120)
         label.setAlignment(Qt.AlignCenter)
         label.setStyleSheet("color: rgb(218, 218, 218); background: rgba(0, 0, 0, 35);")
@@ -2032,15 +2113,6 @@ QListWidget{
             self.videoGrid.setRowStretch(row, 0)
         for column in range(2):
             self.videoGrid.setColumnStretch(column, 0)
-        if self._display_orientation == Qt.Horizontal:
-            self.videoGrid.setRowStretch(0, 1)
-            self.videoGrid.setRowStretch(1, 1)
-            self.videoGrid.setColumnStretch(0, 1)
-            self.videoGrid.setColumnStretch(1, 1)
-        else:
-            self.videoGrid.setColumnStretch(0, 1)
-            for row in range(4):
-                self.videoGrid.setRowStretch(row, 1)
         if enabled:
             if self._display_orientation == Qt.Horizontal:
                 if right_enabled:
@@ -2072,6 +2144,18 @@ QListWidget{
             label, row, column, *span = cell
             self.videoGrid.addWidget(label, row, column, *(span or [1, 1]))
             label.show()
+
+        # 只拉伸实际显示的行列，隐藏检测画面后原图仍能占满整个区域。
+        used_rows = set()
+        used_columns = set()
+        for _label, row, column, *span in cells:
+            row_span, column_span = span or [1, 1]
+            used_rows.update(range(row, row + row_span))
+            used_columns.update(range(column, column + column_span))
+        for row in used_rows:
+            self.videoGrid.setRowStretch(row, 1)
+        for column in used_columns:
+            self.videoGrid.setColumnStretch(column, 1)
 
     def update_left_fps(self, text):
         self.set_realtime_value("left_fps", text)
@@ -2564,12 +2648,6 @@ QPushButton:pressed {
             self.statistic_msg(f'加载：{os.path.basename(name)}')
             self.stop()
 
-    def chose_cam(self):
-        self.stop()
-        self.det_thread.source = default_camera_source()
-        self.cfg["SOURCE"] = self.det_thread.source
-        self.statistic_msg('摄像头模式')
-
     def chose_rtsp(self):
         self.rtsp_win = Window()
         self.rtsp_win.show()
@@ -2670,6 +2748,7 @@ QPushButton:pressed {
         for name, receiver in (
             ("遥测", self.det_thread.telemetry_receiver),
             ("GPS", self.det_thread.gps_receiver),
+            ("HID标签", self.det_thread.hid_tag_receiver),
         ):
             if receiver:
                 try:
@@ -2914,6 +2993,15 @@ if __name__ == "__main__":
     parser.add_argument('--gps-baudrate', type=int, default=None, help='覆盖 GPS 串口波特率')
     parser.add_argument('--gps-stale-timeout', type=float, default=None, help='覆盖 GPS 数据失效时间，单位秒')
     parser.add_argument('--no-gps-auto-detect', action='store_true', help='关闭 GPS 串口自动查找，仅使用指定端口')
+    parser.add_argument('--enable-hid-tags', action='store_true', help='启用左右双路 HID POS 标签扫描器')
+    parser.add_argument('--disable-hid-tags', action='store_true', help='禁用左右双路 HID POS 标签扫描器')
+    parser.add_argument('--hid-tag-left-serial', type=str, default=None, help='左侧 HID POS 扫描器序列号')
+    parser.add_argument('--hid-tag-right-serial', type=str, default=None, help='右侧 HID POS 扫描器序列号')
+    parser.add_argument('--hid-tag-stale-timeout', type=float, default=None, help='扫码标签有效时间，单位秒')
+    parser.add_argument(
+        '--tree-id-source', type=str, choices=('telemetry', 'hid'), default=None,
+        help='果树 ID 来源：telemetry(下位机遥测) | hid(二维码识别设备扫描)',
+    )
     args = parser.parse_args()
 
     # 如果命令行指定了配置方案，则覆盖默认值
@@ -2957,6 +3045,18 @@ if __name__ == "__main__":
         CONFIG["GPS_STALE_TIMEOUT"] = args.gps_stale_timeout
     if args.no_gps_auto_detect:
         CONFIG["GPS_SERIAL_AUTO_DETECT"] = False
+    if args.enable_hid_tags:
+        CONFIG["ENABLE_HID_TAG_SCANNERS"] = True
+    if args.disable_hid_tags:
+        CONFIG["ENABLE_HID_TAG_SCANNERS"] = False
+    if args.hid_tag_left_serial:
+        CONFIG["HID_TAG_LEFT_SERIAL"] = args.hid_tag_left_serial
+    if args.hid_tag_right_serial:
+        CONFIG["HID_TAG_RIGHT_SERIAL"] = args.hid_tag_right_serial
+    if args.hid_tag_stale_timeout is not None:
+        CONFIG["HID_TAG_STALE_TIMEOUT"] = args.hid_tag_stale_timeout
+    if args.tree_id_source:
+        CONFIG["USE_HID_TAG_TREE_IDS"] = args.tree_id_source == "hid"
 
     if should_run_headless(args):
         sys.exit(run_headless(CONFIG))

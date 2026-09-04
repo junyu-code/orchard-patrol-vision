@@ -1,0 +1,2 @@
+# 双路 ADL622/EM22 HID POS 访问权限（Linux）
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1eab", ATTRS{idProduct}=="0010", MODE="0660", GROUP="plugdev"

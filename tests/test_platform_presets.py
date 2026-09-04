@@ -31,6 +31,12 @@ class PlatformPresetTests(unittest.TestCase):
         self.assertTrue(config["ENABLE_PATROL_TIMELINE"])
         self.assertEqual(config["UDP_HOST"], "1.14.205.24")
         self.assertEqual(config["UDP_PORT"], 4926)
+        self.assertEqual(config["UDP_ORCHARD_ID"], "vineyard1")
+        self.assertEqual(config["ROBOT_ID"], 1)
+        self.assertEqual(
+            config["RTMP_URL"],
+            "rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor1",
+        )
 
     def test_both_enables_both_protocol_adapters(self):
         config = build_config("both")
