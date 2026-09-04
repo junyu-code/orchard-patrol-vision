@@ -7,7 +7,7 @@ set "PYTHON_PATH=D:\Anaconda3\envs\yolov5_pyqt5\python.exe"
 if not exist "%PYTHON_PATH%" set "PYTHON_PATH=python"
 
 set "VIDEO_FILE=%PROJECT_DIR%\samples\videos\robot_push\test0_push.mp4"
-set "RTMP_URL=rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor1"
+set "RTMP_URL=rtmp://gl.xsjny.com/live/robot1_sensor2"
 set "UDP_TARGET=1.14.205.24:4926"
 
 cls

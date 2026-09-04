@@ -5,12 +5,11 @@
     "data_view_url": "https://gl.xsjny.com/web/robot-data-view/index.html",
     "udp_host": "1.14.205.24",
     "udp_port": 4926,
-    "orchard_id": "vineyard1",
     "rtmp_host": "gl.xsjny.com",
-    "rtmp_url_pattern": "rtmp://{rtmp_host}/live/{orchard_id}_{robot_name}_{sensor_name}",
+    "rtmp_url_pattern": "rtmp://{rtmp_host}/live/{robot_name}_{sensor_name}",
     "rtmp_streams": {
-      "left": "rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor1",
-      "right": "rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor2"
+      "left": "rtmp://gl.xsjny.com/live/robot1_sensor1",
+      "right": "rtmp://gl.xsjny.com/live/robot1_sensor2"
     }
   },
   "legacy": {

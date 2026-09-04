@@ -67,7 +67,6 @@ class CameraCapabilitiesTests(unittest.TestCase):
             camera_backend,
             camera_capture_source,
             default_camera_source,
-            secondary_camera_source,
         )
 
         fake_cv2 = type("FakeCv2", (), {
@@ -77,12 +76,10 @@ class CameraCapabilitiesTests(unittest.TestCase):
         })
         with patch("transport.camera_capabilities.sys.platform", "linux"):
             self.assertEqual(default_camera_source(), "/dev/video0")
-            self.assertEqual(secondary_camera_source(), "/dev/video1")
             self.assertEqual(camera_capture_source("/dev/video3"), "/dev/video3")
             self.assertEqual(camera_backend(fake_cv2), 200)
         with patch("transport.camera_capabilities.sys.platform", "win32"):
             self.assertEqual(default_camera_source(), "0")
-            self.assertEqual(secondary_camera_source(), "1")
             self.assertEqual(camera_capture_source("/dev/video3"), 3)
             self.assertEqual(camera_backend(fake_cv2), 700)
 

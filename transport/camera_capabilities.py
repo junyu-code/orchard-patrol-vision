@@ -16,13 +16,6 @@ def default_camera_source():
     return "0"
 
 
-def secondary_camera_source():
-    """返回固定绑定的第二路相机名称。"""
-    if sys.platform.startswith("linux"):
-        return "/dev/video1"
-    return "1"
-
-
 def is_camera_source(source):
     """判断输入是否为摄像头编号或 Linux 视频设备路径。"""
     value = str(source or "").strip()
@@ -109,25 +102,22 @@ def probe_camera_fps(source, capture_factory=None):
     if not is_camera_source(value):
         return None
     try:
+        import cv2
+
         camera_id = camera_capture_source(value)
         if capture_factory is not None:
-            # 注入采集工厂时不应要求测试环境安装 OpenCV。
             capture = capture_factory(camera_id)
-            fps_property = 5  # cv2.CAP_PROP_FPS 的稳定枚举值
         else:
-            import cv2
-
             backend = camera_backend(cv2)
             capture = (
                 cv2.VideoCapture(camera_id, backend)
                 if backend
                 else cv2.VideoCapture(camera_id)
             )
-            fps_property = cv2.CAP_PROP_FPS
         try:
             if not capture.isOpened():
                 return None
-            fps = float(capture.get(fps_property) or 0)
+            fps = float(capture.get(cv2.CAP_PROP_FPS) or 0)
             return fps if fps > 0 else None
         finally:
             capture.release()
