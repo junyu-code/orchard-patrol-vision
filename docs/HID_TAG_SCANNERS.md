@@ -20,14 +20,14 @@
 
 默认接受纯数字标签，例如图片中的 `214`，也接受 `TREE:214`、`TREE-214` 和 `TREE_214`。编号范围为 `1` 到 `65535`。
 
-每次扫码会更新对应一侧的树号；默认 3 秒没有再次扫码后该值失效。重复编号在 0.3 秒内只计一次。可通过 `HID_TAG_*` 配置项调整。
+每次扫码会立即更新并替换对应一侧的树号；默认 30 分钟没有新的有效扫码后该值失效并按无树处理。重复编号在 0.3 秒内只计一次。可通过 `HID_TAG_*` 配置项调整。
 
 ## 果树 ID 来源开关
 
 PyQt5 左侧设置区提供“使用二维码识别设备扫描”开关，默认开启；两种状态严格互斥：
 
 - 关闭：果树 ID 只使用下位机遥测值，扫码不会覆盖它。
-- 开启：果树 ID 只使用左右 HID POS 扫码值，不读取下位机树号；未扫码、扫码超时或某一侧没有有效扫码时，对应树号为 `0`。
+- 开启：优先使用左右 HID POS 扫码值；从未扫码时回退到下位机遥测树号（调试视频没有真实遥测时使用巡检时间轴树号），已扫码但超过 30 分钟未有新结果时按无树处理。
 
 开关在运行中切换后从下一帧起生效，不需要重启任务。Linux 无界面运行可使用等价参数：
 
@@ -67,10 +67,13 @@ python3 -m pip install -r requirements.txt
 sudo usermod -aG plugdev "$USER"
 ```
 
-Linux 使用 `hidapi` 访问 `hidraw`。如果设备能枚举但无法打开，需要增加 udev 规则，重新插拔设备并重新登录：
+Linux 使用 `hidapi` 访问扫描器。当前 Conda 环境的 `hidapi` 使用 libusb 后端，
+因此需要同时给 `hidraw` 和父 USB 设备节点授权；如果设备能枚举但无法打开，
+安装以下规则后重新加载 udev 并重新插拔设备（或重新登录）：
 
 ```text
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1eab", ATTRS{idProduct}=="0010", MODE="0660", GROUP="plugdev"
+SUBSYSTEM=="usb", ATTR{idVendor}=="1eab", ATTR{idProduct}=="0010", MODE="0660", GROUP="plugdev"
 ```
 
 Windows 通过系统 `Windows.Devices.PointOfService` API 领取 POS 设备，避免键盘接口抢占输入焦点；Linux 直接从 POS HID 输入报告读取。
@@ -84,4 +87,6 @@ Windows 通过系统 `Windows.Devices.PointOfService` API 领取 POS 设备，�
 [HID标签] 右侧设备已由 Windows POS API 领取：AB030000
 ```
 
-扫码成功时应包含 `左侧扫码：ID0214` 或 `右侧扫码：ID0214`。如果两台扫描器物理方向相反，只需交换 `HID_TAG_LEFT_SERIAL` 和 `HID_TAG_RIGHT_SERIAL` 环境变量，不修改代码。
+Linux 扫码成功时应包含 `左侧扫码：ID0214` 或 `右侧扫码：ID0214`。
+如果两台扫描器物理方向相反，只需交换 `HID_TAG_LEFT_SERIAL` 和
+`HID_TAG_RIGHT_SERIAL` 环境变量，不修改代码。

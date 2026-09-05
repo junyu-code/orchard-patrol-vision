@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from transport.camera_capabilities import (
     camera_device_path,
+    is_camera_source,
     parse_supported_resolutions,
     probe_camera_fps,
     probe_camera_max_resolution,
@@ -76,8 +77,9 @@ class CameraCapabilitiesTests(unittest.TestCase):
             "CAP_AVFOUNDATION": 1200,
         })
         with patch("transport.camera_capabilities.sys.platform", "linux"):
-            self.assertEqual(default_camera_source(), "/dev/video0")
-            self.assertEqual(secondary_camera_source(), "/dev/video1")
+            with patch("transport.camera_capabilities._v4l_by_path_sources", return_value=()):
+                self.assertEqual(default_camera_source(), "/dev/video0")
+                self.assertEqual(secondary_camera_source(), "/dev/video0")
             self.assertEqual(camera_capture_source("/dev/video3"), "/dev/video3")
             self.assertEqual(camera_backend(fake_cv2), 200)
         with patch("transport.camera_capabilities.sys.platform", "win32"):
@@ -85,6 +87,25 @@ class CameraCapabilitiesTests(unittest.TestCase):
             self.assertEqual(secondary_camera_source(), "1")
             self.assertEqual(camera_capture_source("/dev/video3"), 3)
             self.assertEqual(camera_backend(fake_cv2), 700)
+
+    def test_linux_defaults_prefer_by_path_primary_streams(self):
+        from transport.camera_capabilities import default_camera_source, secondary_camera_source
+
+        sources = (
+            "/dev/v4l/by-path/pci-camera-a-video-index0",
+            "/dev/v4l/by-path/pci-camera-b-video-index0",
+        )
+        with patch("transport.camera_capabilities.sys.platform", "linux"), patch(
+            "transport.camera_capabilities._v4l_by_path_sources", return_value=sources
+        ):
+            self.assertEqual(default_camera_source(), sources[0])
+            self.assertEqual(secondary_camera_source(), sources[1])
+        self.assertTrue(is_camera_source(sources[0]))
+        self.assertEqual(camera_device_path(sources[0]), sources[0])
+        self.assertFalse(is_camera_source(sources[0].replace("index0", "index1")))
+
+    def test_numeric_zero_source_remains_a_camera_source(self):
+        self.assertTrue(is_camera_source(0))
 
 
 if __name__ == "__main__":

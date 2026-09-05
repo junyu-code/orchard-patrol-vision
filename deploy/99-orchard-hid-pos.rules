@@ -1,2 +1,5 @@
 # 双路 ADL622/EM22 HID POS 访问权限（Linux）
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1eab", ATTRS{idProduct}=="0010", MODE="0660", GROUP="plugdev"
+# hidapi in the Conda environment uses the libusb backend. Grant the same
+# group access to the parent USB device nodes so hid.device.open_path() works.
+SUBSYSTEM=="usb", ATTR{idVendor}=="1eab", ATTR{idProduct}=="0010", MODE="0660", GROUP="plugdev"

@@ -89,6 +89,18 @@ conda activate yolov5_pyqt5
 pip install -r requirements.txt
 ```
 
+当前 Linux 开发机已配置并验证可用的 Conda 环境为 `detect`，路径为
+`/home/rm/miniconda3/envs/detect`。在该机器上运行程序和测试时使用：
+
+```bash
+conda activate detect
+python main.py
+python -m unittest -v tests.test_hid_pos_receiver
+```
+
+也可以不切换当前 shell，直接使用 `conda run -n detect ...`；不要使用系统 Python，
+否则可能缺少 `torch` 等项目依赖。
+
 模型权重放在 `pt/` 目录下，默认使用 `pt/best.pt`。
 
 ### 2. 启动主程序

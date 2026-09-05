@@ -240,12 +240,21 @@ class LoadImages:  # for inference
 
 
 class LoadWebcam:  # for inference
-    def __init__(self, pipe='0', img_size=640, stride=32):
+    def __init__(self, pipe='0', img_size=640, stride=32,
+                 camera_reconnect_interval=1.0, should_stop=None):
         self.img_size = img_size
         self.stride = stride
         pipe = str(pipe)
         self.pipe = camera_capture_source(pipe) if is_camera_source(pipe) else pipe
-        if is_camera_source(pipe):
+        self.camera_reconnect_interval = max(0.0, float(camera_reconnect_interval or 0))
+        self.should_stop = should_stop or (lambda: False)
+        # Keep direct ``next(loader)`` calls equivalent to iteration through a
+        # for-loop; callers and tests do not always invoke ``iter`` first.
+        self.count = -1
+        self._open_camera()
+
+    def _open_camera(self):
+        if is_camera_source(self.pipe):
             backend = camera_backend(cv2)
             self.cap = cv2.VideoCapture(self.pipe, backend) if backend else cv2.VideoCapture(self.pipe)
             if not self.cap.isOpened():
@@ -260,6 +269,28 @@ class LoadWebcam:  # for inference
         self._frame_ratio = 1.0
         self._output_frame_count = 0
         self.frame_step = 1
+
+    def _reconnect_camera(self):
+        self.cap.release()
+        attempts = 0
+        print(f"摄像头 {self.pipe} 已断开，等待设备恢复")
+        while not self.should_stop():
+            attempts += 1
+            retry_at = time.monotonic() + self.camera_reconnect_interval
+            while time.monotonic() < retry_at:
+                if self.should_stop():
+                    raise StopIteration
+                time.sleep(min(0.1, retry_at - time.monotonic()))
+            self._open_camera()
+            if self.cap.isOpened():
+                ret, frame = self.cap.read()
+                if ret and frame is not None:
+                    print(f"摄像头 {self.pipe} 已恢复，重连次数: {attempts}")
+                    return ret, frame
+            self.cap.release()
+            if attempts == 1 or attempts % 10 == 0:
+                print(f"摄像头 {self.pipe} 仍不可用，已重试 {attempts} 次")
+        raise StopIteration
 
     def set_target_fps(self, target_fps):
         """设置识别采集目标帧率，低于源帧率时丢弃过渡帧。"""
@@ -285,7 +316,11 @@ class LoadWebcam:  # for inference
 
         # Read frame
         ret_val, img0 = self.cap.read()
-        assert ret_val and img0 is not None, f'Camera Error {self.pipe}'
+        if not ret_val or img0 is None:
+            if is_camera_source(self.pipe):
+                ret_val, img0 = self._reconnect_camera()
+            else:
+                raise StopIteration
         self._output_frame_count += 1
         previous_target = int(
             (self._output_frame_count - 1) * self._frame_ratio + 0.5

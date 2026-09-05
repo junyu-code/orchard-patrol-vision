@@ -1,9 +1,11 @@
 import unittest
+from unittest.mock import patch
 
 import cv2
 import numpy as np
 
 from main import LoadRawFrames
+from utils.datasets import LoadWebcam
 
 
 class FakeCapture:
@@ -102,6 +104,23 @@ class CameraReconnectTests(unittest.TestCase):
             next(loader)
 
         self.assertTrue(capture.released)
+
+    def test_yolo_camera_read_failure_reopens_device_and_returns_frame(self):
+        first_capture = FakeCapture([(False, None)])
+        recovered_frame = np.zeros((4, 6, 3), dtype=np.uint8)
+        second_capture = FakeCapture([(True, recovered_frame)])
+        captures = [first_capture, second_capture]
+
+        with patch("utils.datasets.cv2.VideoCapture", side_effect=lambda *_args: captures.pop(0)):
+            loader = LoadWebcam("0", camera_reconnect_interval=0)
+            path, image, frame, active_capture = next(loader)
+
+        self.assertTrue(first_capture.released)
+        self.assertIs(active_capture, second_capture)
+        self.assertEqual(path, "webcam.jpg")
+        # ``letterbox`` preserves aspect ratio while aligning the long edge.
+        self.assertEqual(image.shape, (3, 448, 640))
+        np.testing.assert_array_equal(frame, cv2_flip(recovered_frame))
 
     def test_file_source_drops_frames_to_match_target_fps(self):
         capture = IndexedCapture(frame_count=12, fps=30)

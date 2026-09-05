@@ -173,15 +173,43 @@ def merge_hid_tag_tree_data(
     tag_snapshot: Optional[HidTagSnapshot],
     hid_only: bool = False,
 ) -> Optional[dict]:
-    """合并扫码树号；严格扫码模式下不读取下位机树号。"""
+    """合并扫码树号；有效扫码覆盖对应侧，其余字段保留基础数据。"""
     snapshot = tag_snapshot or HidTagSnapshot.empty()
     active = []
+    stale_sides = []
     for side in TREE_SIDES:
         side_snapshot = getattr(snapshot, side)
         if side_snapshot.valid and side_snapshot.reading is not None:
             active.append((side, side_snapshot.reading))
+        elif side_snapshot.stale and side_snapshot.reading is not None:
+            stale_sides.append(side)
 
     if not active:
+        if stale_sides:
+            # 已经收到过二维码但超过有效期时，不能回退到可能仍保存旧编号的
+            # 遥测/时间轴数据；上传明确的无树状态。
+            if base_tree_data is None and not hid_only:
+                return None
+            result = {} if hid_only else dict(base_tree_data or {})
+            result.update(
+                {
+                    "current_tree_id": 0,
+                    "left_tree_id": 0,
+                    "right_tree_id": 0,
+                    "camera_side": 0,
+                    "source": (
+                        "hid_pos"
+                        if hid_only or base_tree_data is None
+                        else "mixed_hid_pos"
+                    ),
+                    "tag_serials": {},
+                }
+            )
+            if "tree_code" in result:
+                result["tree_code"] = ""
+            if "tree_id" in result:
+                result["tree_id"] = 0
+            return result
         if hid_only:
             return {
                 "current_tree_id": 0,
@@ -198,6 +226,8 @@ def merge_hid_tag_tree_data(
     result.setdefault("right_tree_id", 0)
     for side, reading in active:
         result[f"{side}_tree_id"] = reading.tree_id
+    for side in stale_sides:
+        result[f"{side}_tree_id"] = 0
 
     latest_side, latest_reading = max(
         active,
@@ -221,12 +251,12 @@ def select_tree_id_data(
     tag_snapshot: Optional[HidTagSnapshot],
     use_hid_tags: bool,
 ) -> Optional[dict]:
-    """按配置严格选择树号来源，不在两种来源之间自动回退。"""
+    """选择树号来源；有效扫码覆盖基础数据，过期扫码按无树处理。"""
     if use_hid_tags:
         return merge_hid_tag_tree_data(
             telemetry_tree_data,
             tag_snapshot,
-            hid_only=True,
+            hid_only=False,
         )
     return (
         dict(telemetry_tree_data)
@@ -244,7 +274,7 @@ class DualHidPosReceiver:
         right_serial: str,
         vendor_id: int = 0x1EAB,
         product_id: int = 0x0010,
-        stale_timeout: float = 3.0,
+        stale_timeout: float = 30 * 60.0,
         duplicate_interval: float = 0.3,
         reconnect_interval: float = 2.0,
         poll_interval: float = 0.01,
@@ -348,7 +378,7 @@ class DualHidPosReceiver:
                 snapshots[side] = HidTagSideSnapshot.empty()
                 continue
             age_ms = max(0, current_ms - reading.received_at_ms)
-            stale = age_ms > self.stale_timeout_ms
+            stale = age_ms >= self.stale_timeout_ms
             snapshots[side] = HidTagSideSnapshot(
                 reading=reading,
                 age_ms=age_ms,
@@ -365,17 +395,40 @@ class DualHidPosReceiver:
             return dict(self._stats)
 
     def enumerate_bound_devices(self) -> dict:
-        """枚举已配置序列号对应的 HID POS 接口，供启动和现场自检复用。"""
+        """枚举并绑定左右 HID POS 接口，供启动和现场自检复用。
+
+        部分 Linux hidraw 驱动不会返回 USB serial_number，也可能省略
+        usage/product 描述。此时在已经按 VID/PID 过滤的设备中按路径排序，
+        将两台设备稳定分配给左右两侧。
+        """
         found = {}
         devices = self.hid_backend.enumerate(self.vendor_id, self.product_id) or []
         self._increment_stat("enumeration_cycles")
+        candidates = []
         for device_info in devices:
             if not self._is_pos_interface(device_info):
                 continue
+            candidates.append(device_info)
             serial_number = self._normalize_serial(device_info.get("serial_number"))
             for side, expected_serial in self.serial_by_side.items():
                 if serial_number == expected_serial and side not in found:
                     found[side] = device_info
+
+        # Linux 上常见 serial_number 为空；按物理 USB 拓扑路径排序，保证
+        # 同一组端口每次枚举顺序一致。若能匹配到一侧，只补另一侧。
+        unbound_sides = [side for side in TREE_SIDES if side not in found]
+        unbound_devices = [
+            device for device in sorted(candidates, key=self._device_path_key)
+            if device not in found.values()
+        ]
+        if unbound_devices and unbound_sides:
+            for side, device_info in zip(unbound_sides, unbound_devices):
+                found[side] = device_info
+                if not self._normalize_serial(device_info.get("serial_number")):
+                    print(
+                        f"[HID标签] {self._side_label(side)}设备无序列号，"
+                        f"按路径绑定：{self._device_path_text(device_info.get('path'))}"
+                    )
         return found
 
     def _run(self):
@@ -628,7 +681,21 @@ class DualHidPosReceiver:
             return True
         product = str(device_info.get("product_string") or "").strip().upper()
         interface_number = device_info.get("interface_number")
-        return "HID POS" in product and interface_number in (None, 0, 1)
+        if "HID POS" in product and interface_number in (None, 0, 1):
+            return True
+        # hidapi 在部分 Linux hidraw 后端会把描述字段全部返回为空；
+        # enumerate() 已按本接收器的 EM22 VID/PID 过滤，接口 0/1 可直接使用。
+        return not product and interface_number in (None, 0, 1)
+
+    @staticmethod
+    def _device_path_text(path) -> str:
+        if isinstance(path, bytes):
+            return path.decode("utf-8", errors="replace")
+        return str(path or "")
+
+    @classmethod
+    def _device_path_key(cls, device_info: Mapping) -> str:
+        return cls._device_path_text(device_info.get("path"))
 
     @staticmethod
     def _windows_pos_device_id(hid_path) -> str:

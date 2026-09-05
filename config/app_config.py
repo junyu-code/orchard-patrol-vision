@@ -225,14 +225,15 @@ BASE_CONFIG = {
     "GPS_EVENT_LOG_DIR": "./result/gps_events",
     "GPS_EVENT_LOG_RETENTION_DAYS": 3,
 
-    # 双路 EM22 HID POS 标签扫描器；序列号用于固定左右，不依赖 USB 枚举顺序
+    # 双路 EM22 HID POS 标签扫描器；默认开启，序列号用于固定左右，不依赖 USB 枚举顺序
     "ENABLE_HID_TAG_SCANNERS": True,
     "HID_TAG_VENDOR_ID": 0x1EAB,
     "HID_TAG_PRODUCT_ID": 0x0010,
     "HID_TAG_LEFT_SERIAL": os.getenv("HID_TAG_LEFT_SERIAL", "AB031246"),
     "HID_TAG_RIGHT_SERIAL": os.getenv("HID_TAG_RIGHT_SERIAL", "AB030000"),
     "USE_HID_TAG_TREE_IDS": True,
-    "HID_TAG_STALE_TIMEOUT": 3.0,
+    # 二维码果树编号在 30 分钟内有效；超时后按无树处理
+    "HID_TAG_STALE_TIMEOUT": 30 * 60.0,
     "HID_TAG_DUPLICATE_INTERVAL": 0.3,
     "HID_TAG_RECONNECT_INTERVAL": 2.0,
     "HID_TAG_POLL_INTERVAL": 0.01,
@@ -242,7 +243,7 @@ BASE_CONFIG = {
     # YOLO 模型配置
     "WEIGHTS": "./pt/best.pt",
     "SOURCE": default_camera_source(),
-    # 双路相机固定绑定：左路设备 0，右路设备 1；Linux 对应 /dev/video0、/dev/video1
+    # 双路相机固定绑定；Linux 优先使用 /dev/v4l/by-path/*-video-index0 稳定路径
     "CAMERA_SOURCE_LEFT": os.getenv("CAMERA_LEFT_SOURCE", default_camera_source()),
     "CAMERA_SOURCE_RIGHT": os.getenv("CAMERA_RIGHT_SOURCE", secondary_camera_source()),
     "CONF_THRES": 0.8,

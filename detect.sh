@@ -20,15 +20,25 @@ if [ "${1:-}" = "--foreground" ]; then
     RUN_FOREGROUND=true
     shift
 fi
-# 当前 USB 转串口设备由 udev 映射为 ttyGPS_IN；保留环境变量覆盖入口。
-TELEMETRY_SERIAL_PORT="${TELEMETRY_SERIAL_PORT:-/dev/ttyGPS_IN}"
+# 当前下位机 USB 转串口设备；保留环境变量覆盖入口。
+TELEMETRY_SERIAL_PORT="${TELEMETRY_SERIAL_PORT:-/dev/ttyUSB0}"
 TELEMETRY_SERIAL_BAUDRATE="${TELEMETRY_SERIAL_BAUDRATE:-9600}"
 DATA_MODE="${DATA_MODE:-debug}"
 APP_PRESET="${APP_PRESET:-client_b}"
+CAMERA_SOURCE="${CAMERA_LEFT_SOURCE:-}"
+if [ -z "${CAMERA_SOURCE}" ]; then
+    for candidate in /dev/v4l/by-path/*-video-index0; do
+        if [ -e "${candidate}" ]; then
+            CAMERA_SOURCE="${candidate}"
+            break
+        fi
+    done
+fi
+CAMERA_SOURCE="${CAMERA_SOURCE:-/dev/video0}"
 MAIN_ARGS=(
     --preset "${APP_PRESET}"
     --data-mode "${DATA_MODE}"
-    --source /dev/video0
+    --source "${CAMERA_SOURCE}"
     --auto-start
     --enable-telemetry-serial
     --telemetry-port "${TELEMETRY_SERIAL_PORT}"

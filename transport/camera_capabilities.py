@@ -1,17 +1,34 @@
 """Camera resolution capability probing for the desktop controls."""
 
 import re
+from pathlib import Path
 import subprocess
 import sys
 
 
 _RESOLUTION_PATTERN = re.compile(r"(?<!\d)(\d{2,5})x(\d{2,5})(?!\d)")
 _VIDEO_DEVICE_PATTERN = re.compile(r"^/dev/video(\d+)$")
+_V4L_STABLE_PATTERN = re.compile(r"^/dev/v4l/by-(?:path|id)/.+-video-index0$")
+_V4L_BY_PATH_DIR = Path("/dev/v4l/by-path")
+
+
+def _v4l_by_path_sources():
+    """Return stable V4L2 by-path links for primary capture streams."""
+    if not sys.platform.startswith("linux"):
+        return ()
+    try:
+        # index1 is commonly a metadata/auxiliary interface; OpenCV should use index0.
+        return tuple(sorted(str(path) for path in _V4L_BY_PATH_DIR.glob("*-video-index0")))
+    except OSError:
+        return ()
 
 
 def default_camera_source():
     """返回当前系统适用的默认相机名称。"""
     if sys.platform.startswith("linux"):
+        sources = _v4l_by_path_sources()
+        if sources:
+            return sources[0]
         return "/dev/video0"
     return "0"
 
@@ -19,14 +36,22 @@ def default_camera_source():
 def secondary_camera_source():
     """返回固定绑定的第二路相机名称。"""
     if sys.platform.startswith("linux"):
-        return "/dev/video1"
+        sources = _v4l_by_path_sources()
+        if len(sources) > 1:
+            return sources[1]
+        # Do not fall back to video1: many cameras expose it as an auxiliary stream.
+        return default_camera_source()
     return "1"
 
 
 def is_camera_source(source):
     """判断输入是否为摄像头编号或 Linux 视频设备路径。"""
-    value = str(source or "").strip()
-    return value.isnumeric() or bool(_VIDEO_DEVICE_PATTERN.match(value))
+    value = str("" if source is None else source).strip()
+    return (
+        value.isnumeric()
+        or bool(_VIDEO_DEVICE_PATTERN.match(value))
+        or bool(_V4L_STABLE_PATTERN.match(value))
+    )
 
 
 def camera_capture_source(source):
@@ -64,6 +89,8 @@ def camera_device_path(source):
     if sys.platform.startswith("linux") and value.isnumeric():
         return f"/dev/video{value}"
     if sys.platform.startswith("linux") and _VIDEO_DEVICE_PATTERN.match(value):
+        return value
+    if sys.platform.startswith("linux") and _V4L_STABLE_PATTERN.match(value):
         return value
     return None
 

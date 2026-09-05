@@ -636,7 +636,7 @@ class DetThread(QThread):
                         right_serial=self.cfg.get("HID_TAG_RIGHT_SERIAL", ""),
                         vendor_id=self.cfg.get("HID_TAG_VENDOR_ID", 0x1EAB),
                         product_id=self.cfg.get("HID_TAG_PRODUCT_ID", 0x0010),
-                        stale_timeout=self.cfg.get("HID_TAG_STALE_TIMEOUT", 3.0),
+                        stale_timeout=self.cfg.get("HID_TAG_STALE_TIMEOUT", 30 * 60.0),
                         duplicate_interval=self.cfg.get(
                             "HID_TAG_DUPLICATE_INTERVAL", 0.3
                         ),
@@ -877,6 +877,28 @@ class DetThread(QThread):
             try: self.udp_sender.close()
             except: pass
 
+    def request_capture_stop(self):
+        """Stop frame acquisition without tearing down reusable transports.
+
+        ``cv2.VideoCapture.read`` can block while a camera is unplugged.  The
+        UI needs to release that handle immediately so the worker can unwind;
+        full sender/receiver cleanup remains owned by ``cleanup_resources``
+        when the thread is rebuilt or the application exits.
+        """
+        self.jump_out = True
+        self.is_continue = False
+        dataset = getattr(self, "dataset", None)
+        captures = (
+            getattr(dataset, "cap", None),
+            getattr(self, "vid_cap", None),
+        )
+        for capture in captures:
+            if capture is not None:
+                try:
+                    capture.release()
+                except Exception:
+                    pass
+
     @torch.no_grad()
     def run(self, imgsz=None, max_det=1000, device='', view_img=True, save_txt=False, 
             save_conf=False, save_crop=False, nosave=False, classes=None, agnostic_nms=False, 
@@ -959,7 +981,15 @@ class DetThread(QThread):
                 else:
                     # check_imshow()
                     cudnn.benchmark = True
-                    dataset = LoadWebcam(self.source, img_size=imgsz, stride=stride)
+                    dataset = LoadWebcam(
+                        self.source,
+                        img_size=imgsz,
+                        stride=stride,
+                        camera_reconnect_interval=self.cfg.get(
+                            "CAMERA_RECONNECT_INTERVAL", 1.0
+                        ),
+                        should_stop=lambda: self.jump_out,
+                    )
             else:
                 if raw_stream_only:
                     dataset = LoadRawFrames(
@@ -1159,13 +1189,8 @@ class DetThread(QThread):
                         use_hid_tags=True,
                     )
                 elif use_hid_tag_tree_ids:
-                    tree_event = {
-                        "current_tree_id": 0,
-                        "left_tree_id": 0,
-                        "right_tree_id": 0,
-                        "camera_side": 0,
-                        "source": "hid_pos",
-                    }
+                    # HID 模块不可用时仍保留遥测或调试时间轴的基础数据。
+                    tree_event = base_tree_event
                 else:
                     # 关闭二维码来源时保留下位机数据；无真实遥测时允许仿真时间轴工作。
                     tree_event = base_tree_event
@@ -1352,9 +1377,9 @@ class DetThread(QThread):
                         "tree": (
                             "real"
                             if hid_tag_active
-                            or (real_tree_data is not None and not use_hid_tag_tree_ids)
+                            or real_tree_data is not None
                             else "virtual"
-                            if timeline_tree_event and not use_hid_tag_tree_ids
+                            if timeline_tree_event
                             else "unavailable"
                         ),
                         "work_mode": "real",
@@ -1571,6 +1596,9 @@ class MainWindow(QMainWindow, Ui_mainWindow):
         self.camera_reconnect_timer = QTimer(self)
         self.camera_reconnect_timer.setSingleShot(True)
         self.camera_reconnect_timer.timeout.connect(self._restart_camera_detection)
+        self.hid_tag_status_timer = QTimer(self)
+        self.hid_tag_status_timer.setInterval(250)
+        self.hid_tag_status_timer.timeout.connect(self.refresh_hid_tag_status)
         self.setWindowFlags(Qt.CustomizeWindowHint | Qt.WindowStaysOnTopHint)
         self.setup_compact_left_panel()
         self.setup_recording_controls()
@@ -1600,6 +1628,8 @@ class MainWindow(QMainWindow, Ui_mainWindow):
         self.bind_signals()
         self.load_setting()
         self.start_background_data_receivers()
+        self.refresh_hid_tag_status()
+        self.hid_tag_status_timer.start()
 
     def _create_det_thread(self):
         """Create a worker from the current UI-selected transport configuration."""
@@ -1898,7 +1928,7 @@ QFrame[role="divider"] {
             "camera_height": "相机视点相对地面的实时高度",
             "battery": "电控上报的剩余电量和电池电压",
             "fault": "电控故障码，0 表示无故障",
-            "tree": "当前树及左右果树编号，编号 0 表示当前无树",
+            "tree": "当前果树 ID 及左右果树 ID，编号 0 表示当前无树",
             "route": "当前巡检路线和路径点编号",
             "work_mode": "检测方式和真实/调试/仿真数据模式",
             "frame_index": "视觉主机当前处理的视频帧序号",
@@ -1915,7 +1945,7 @@ QFrame[role="divider"] {
                 ("fault", "故障码"),
             )),
             ("巡检任务", (
-                ("tree", "果树"),
+                ("tree", "果树ID"),
                 ("route", "路线位置"),
                 ("work_mode", "任务模式"),
                 ("frame_index", "当前帧"),
@@ -2021,8 +2051,8 @@ QListWidget{
         self.hidTagTreeIdButton.setMinimumHeight(30)
         self.hidTagTreeIdButton.setCursor(Qt.PointingHandCursor)
         self.hidTagTreeIdButton.setToolTip(
-            "启用后，左右果树 ID 只使用二维码识别设备的扫描结果；"
-            "未扫到时为 0，不读取下位机树号"
+            "启用后优先使用二维码识别设备的扫描结果；"
+            "未扫到时回退下位机遥测，调试视频再使用巡检时间轴"
         )
         self.hidTagTreeIdButton.setStyleSheet("""
 QPushButton#hidTagTreeIdButton {
@@ -2050,6 +2080,105 @@ QPushButton#hidTagTreeIdButton:hover {
         )
         self.hidTagTreeIdButton.toggled.connect(self.change_tree_id_source)
         self.verticalLayout_8.insertWidget(4, self.hidTagTreeIdButton)
+
+        self.hidTagLatestFrame = QFrame(self.groupBox_8)
+        self.hidTagLatestFrame.setObjectName("hidTagLatestFrame")
+        self.hidTagLatestFrame.setStyleSheet("""
+QFrame#hidTagLatestFrame {
+    background-color: rgba(255, 255, 255, 18);
+    border: 1px solid rgba(255, 255, 255, 42);
+    border-radius: 4px;
+}
+QLabel#hidTagLatestTitle {
+    color: rgba(230, 236, 231, 175);
+    font: bold 12px "Microsoft YaHei";
+}
+QLabel#hidTagLatestSide {
+    color: rgba(225, 230, 226, 150);
+    font: 12px "Microsoft YaHei";
+}
+QLabel#hidTagLatestValue {
+    color: #f0f3ef;
+    font: 12px "DejaVu Sans Mono";
+}
+QLabel#hidTagLatestValue[available="false"] {
+    color: rgba(225, 230, 226, 92);
+}
+""")
+        latest_layout = QGridLayout(self.hidTagLatestFrame)
+        latest_layout.setContentsMargins(9, 7, 9, 7)
+        latest_layout.setHorizontalSpacing(8)
+        latest_layout.setVerticalSpacing(3)
+        latest_title = QLabel("最新扫码结果", self.hidTagLatestFrame)
+        latest_title.setObjectName("hidTagLatestTitle")
+        latest_layout.addWidget(latest_title, 0, 0, 1, 2)
+        self.hid_tag_latest_value_labels = {}
+        for row, (side, title) in enumerate((("left", "左侧"), ("right", "右侧")), 1):
+            side_label = QLabel(title, self.hidTagLatestFrame)
+            side_label.setObjectName("hidTagLatestSide")
+            value_label = QLabel("未扫描", self.hidTagLatestFrame)
+            value_label.setObjectName("hidTagLatestValue")
+            value_label.setProperty("available", False)
+            value_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            latest_layout.addWidget(side_label, row, 0)
+            latest_layout.addWidget(value_label, row, 1)
+            self.hid_tag_latest_value_labels[side] = value_label
+        latest_layout.setColumnStretch(1, 1)
+        self.verticalLayout_8.insertWidget(5, self.hidTagLatestFrame)
+
+    def refresh_hid_tag_status(self):
+        """刷新左右 HID 扫描器最近一次结果，过期结果仍保留并明确标记。"""
+        labels = getattr(self, "hid_tag_latest_value_labels", {})
+        if not labels:
+            return
+        receiver = getattr(getattr(self, "det_thread", None), "hid_tag_receiver", None)
+        if receiver is None:
+            for label in labels.values():
+                label.setText("未启用")
+                label.setProperty("available", False)
+                label.setToolTip("HID 标签扫描器未启用或当前为仿真模式")
+                label.style().unpolish(label)
+                label.style().polish(label)
+            return
+        try:
+            snapshot = receiver.get_snapshot()
+        except Exception as exc:
+            for label in labels.values():
+                label.setText("读取失败")
+                label.setProperty("available", False)
+                label.setToolTip(f"读取 HID 标签状态失败：{exc}")
+                label.style().unpolish(label)
+                label.style().polish(label)
+            return
+
+        for side, label in labels.items():
+            side_snapshot = getattr(snapshot, side, None)
+            reading = getattr(side_snapshot, "reading", None)
+            if reading is None:
+                text = "未扫描"
+                tooltip = f"{side} 侧尚未收到有效扫码结果"
+                available = False
+            else:
+                tree_id = int(getattr(reading, "tree_id", 0) or 0)
+                raw_text = str(getattr(reading, "raw_text", "") or "").strip()
+                text = f"ID{tree_id:04d}"
+                if raw_text and raw_text.upper() != text:
+                    text = f"{text} ({raw_text})"
+                age_ms = getattr(side_snapshot, "age_ms", None)
+                if getattr(side_snapshot, "stale", False):
+                    text += " · 已超时"
+                elif age_ms is not None:
+                    text += f" · {float(age_ms) / 1000:.1f}秒前"
+                tooltip = (
+                    f"原始结果：{raw_text or '—'}\n"
+                    f"扫描器序列号：{getattr(reading, 'serial_number', '—')}"
+                )
+                available = True
+            label.setText(text)
+            label.setProperty("available", available)
+            label.setToolTip(tooltip)
+            label.style().unpolish(label)
+            label.style().polish(label)
 
     def _update_tree_id_source_button_text(self, enabled):
         """根据当前选择更新二维码识别设备按钮文案。"""
@@ -2555,7 +2684,19 @@ QPushButton#recordButton[recording="true"] {
         self.show_image(frame, self.right_raw_video)
 
     def handle_right_detection_finished(self):
-        return None
+        if (
+            self._closing
+            or self.right_det_thread is None
+            or self.right_det_thread.jump_out
+            or not is_camera_source(self.right_det_thread.source)
+        ):
+            return
+        retry_ms = max(
+            100,
+            int(float(self.cfg.get("CAMERA_RECONNECT_INTERVAL", 1.0)) * 1000),
+        )
+        self.statistic_msg("右路摄像头连接中断，正在自动恢复")
+        self.camera_reconnect_timer.start(retry_ms)
 
     def handle_detection_finished(self):
         self.streamResolutionCombo.setEnabled(True)
@@ -2667,11 +2808,14 @@ QPushButton:pressed {
             return
         old_thread = self.det_thread
         self.cfg["SOURCE"] = old_thread.source
-        old_thread.jump_out = True
+        old_thread.request_capture_stop()
         if self.right_det_thread is not None:
-            self.right_det_thread.jump_out = True
+            self.right_det_thread.request_capture_stop()
             if self.right_det_thread.isRunning():
-                self.right_det_thread.wait(2000)
+                if not self.right_det_thread.wait(2000):
+                    self.statistic_msg("右路相机仍在停止，稍后重试")
+                    QTimer.singleShot(100, self.run_or_continue)
+                    return
             self.right_det_thread.cleanup_resources(stop_gps=True)
         old_thread.cleanup_resources(stop_gps=True)
         self._create_det_thread()
@@ -2679,8 +2823,42 @@ QPushButton:pressed {
         self._worker_config_dirty = False
 
     def run_or_continue(self):
+        if self._closing:
+            return
         self.camera_reconnect_timer.stop()
+        if self.det_thread.isRunning() and self.det_thread.jump_out:
+            # stop() may still be unwinding a blocking camera read.  Do not clear
+            # jump_out mid-unwind; retry after QThread emits finished instead.
+            self.det_thread.request_capture_stop()
+            if self.right_det_thread is not None:
+                self.right_det_thread.request_capture_stop()
+            self.statistic_msg("正在停止相机，稍后重新启动")
+            QTimer.singleShot(100, self.run_or_continue)
+            return
+        # Apply pending configuration changes before deciding whether a
+        # finished QThread needs rebuilding; this prevents two successive
+        # replacements when both conditions are true.
         self._recreate_det_thread_if_needed()
+        # QThread 实例结束后不能再次 start；手动停止后重新启动必须重建线程，
+        # 以便重新打开相机句柄，同时保留现有配置和三次关闭监督逻辑。
+        if self.det_thread.isFinished() and not self._closing:
+            if self.right_det_thread is not None:
+                self.right_det_thread.request_capture_stop()
+                if self.right_det_thread.isRunning():
+                    if not self.right_det_thread.wait(2000):
+                        self.statistic_msg("右路相机仍在停止，稍后重试")
+                        QTimer.singleShot(100, self.run_or_continue)
+                        return
+                self.right_det_thread.cleanup_resources(stop_gps=True)
+            self.det_thread.cleanup_resources(stop_gps=True)
+            self._create_det_thread()
+        elif (
+            self.right_det_thread is not None
+            and self.right_det_thread.isFinished()
+            and not self._closing
+        ):
+            self.right_det_thread.cleanup_resources(stop_gps=True)
+            self._create_right_det_thread()
         camera_unavailable = self._is_unavailable_camera_source(self.det_thread.source)
         if camera_unavailable:
             self.statistic_msg(f'摄像头 {self.det_thread.source} 暂不可用，正在等待重连')
@@ -2712,14 +2890,13 @@ QPushButton:pressed {
 
     def stop(self):
         self.camera_reconnect_timer.stop()
+        self.runButton.setChecked(False)
         recording_path = None
         if self.recording_mode == "camera":
             recording_path = self.stop_recording(show_message=False)
-        self.det_thread.jump_out = True
-        self.det_thread.is_continue = False
+        self.det_thread.request_capture_stop()
         if self.right_det_thread is not None:
-            self.right_det_thread.jump_out = True
-            self.right_det_thread.is_continue = False
+            self.right_det_thread.request_capture_stop()
         if recording_path is None:
             self.statistic_msg('已停止')
         else:
@@ -2733,15 +2910,16 @@ QPushButton:pressed {
 
         self.qtimer.stop()
         self.camera_reconnect_timer.stop()
+        self.hid_tag_status_timer.stop()
         self.stop_recording(show_message=False)
         if hasattr(self, "rtsp_win") and self.rtsp_win is not None:
             try: self.rtsp_win.close()
             except: pass
 
-        self.det_thread.jump_out = True
+        self.det_thread.request_capture_stop()
         self.det_thread.is_continue = True
         if self.right_det_thread is not None:
-            self.right_det_thread.jump_out = True
+            self.right_det_thread.request_capture_stop()
             self.right_det_thread.is_continue = True
 
         # 串口接收线程可能早于检测启动，先停止它们再等待检测线程退出。
@@ -2997,7 +3175,12 @@ if __name__ == "__main__":
     parser.add_argument('--disable-hid-tags', action='store_true', help='禁用左右双路 HID POS 标签扫描器')
     parser.add_argument('--hid-tag-left-serial', type=str, default=None, help='左侧 HID POS 扫描器序列号')
     parser.add_argument('--hid-tag-right-serial', type=str, default=None, help='右侧 HID POS 扫描器序列号')
-    parser.add_argument('--hid-tag-stale-timeout', type=float, default=None, help='扫码标签有效时间，单位秒')
+    parser.add_argument(
+        '--hid-tag-stale-timeout',
+        type=float,
+        default=None,
+        help='扫码标签有效时间，单位秒（默认 1800，即 30 分钟）',
+    )
     parser.add_argument(
         '--tree-id-source', type=str, choices=('telemetry', 'hid'), default=None,
         help='果树 ID 来源：telemetry(下位机遥测) | hid(二维码识别设备扫描)',
