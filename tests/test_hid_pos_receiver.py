@@ -9,6 +9,7 @@ from transport.hid_pos_receiver import (
     merge_hid_tag_tree_data,
     parse_tree_tag,
     select_tree_id_data,
+    tree_column_for_id,
 )
 
 
@@ -22,13 +23,52 @@ class HidPosReceiverTests(unittest.TestCase):
             clock_ms=lambda: now[0],
         )
 
-        self.assertTrue(receiver._handle_barcode_data("left", b"214"))
+        self.assertTrue(receiver._handle_barcode_data("left", b"44"))
         now[0] = 1001
-        self.assertTrue(receiver._handle_barcode_data("left", b"315"))
+        self.assertTrue(receiver._handle_barcode_data("left", b"76"))
 
         snapshot = receiver.get_snapshot()
-        self.assertEqual(snapshot.left.tree_id, 315)
-        self.assertEqual(snapshot.left.reading.raw_text, "315")
+        self.assertEqual(snapshot.left.tree_id, 76)
+        self.assertEqual(snapshot.left.reading.raw_text, "76")
+
+    def test_left_column_four_is_rejected_while_right_is_still_column_one(self):
+        now = [1000]
+        receiver = DualHidPosReceiver(
+            left_serial="AB031246",
+            right_serial="AB030000",
+            hid_backend=object(),
+            clock_ms=lambda: now[0],
+        )
+
+        self.assertTrue(receiver._handle_barcode_data("right", b"10"))
+        self.assertFalse(receiver._handle_barcode_data("left", b"130"))
+        self.assertEqual(receiver.get_snapshot().right.tree_id, 10)
+        self.assertIsNone(receiver.get_snapshot().left.reading)
+
+    def test_adjacent_columns_can_advance_as_a_pair(self):
+        receiver = DualHidPosReceiver(
+            left_serial="AB031246",
+            right_serial="AB030000",
+            hid_backend=object(),
+        )
+        self.assertTrue(receiver._handle_barcode_data("right", b"10"))
+        self.assertTrue(receiver._handle_barcode_data("left", b"44"))
+        self.assertTrue(receiver._handle_barcode_data("right", b"80"))
+        self.assertTrue(receiver._handle_barcode_data("left", b"130"))
+
+    def test_right_can_change_from_column_one_to_three_while_left_stays_two(self):
+        receiver = DualHidPosReceiver(
+            left_serial="AB031246",
+            right_serial="AB030000",
+            hid_backend=object(),
+        )
+        self.assertTrue(receiver._handle_barcode_data("right", b"10"))
+        self.assertTrue(receiver._handle_barcode_data("left", b"44"))
+        self.assertTrue(receiver._handle_barcode_data("right", b"80"))
+        snapshot = receiver.get_snapshot()
+        self.assertEqual(snapshot.right.tree_id, 80)
+        self.assertEqual(tree_column_for_id(snapshot.right.tree_id), 3)
+        self.assertEqual(snapshot.left.tree_id, 44)
 
     def test_scan_expires_at_thirty_minutes_without_new_data(self):
         receiver = DualHidPosReceiver(
@@ -37,7 +77,7 @@ class HidPosReceiverTests(unittest.TestCase):
             hid_backend=object(),
             clock_ms=lambda: 1000,
         )
-        self.assertTrue(receiver._handle_barcode_data("left", b"214"))
+        self.assertTrue(receiver._handle_barcode_data("left", b"44"))
 
         snapshot = receiver.get_snapshot(now_ms=1000 + 30 * 60 * 1000)
         self.assertTrue(snapshot.left.stale)
@@ -68,8 +108,8 @@ class HidPosReceiverTests(unittest.TestCase):
         self.assertEqual(parse_tree_tag("TREE:00214", receiver.tag_pattern), 214)
 
     def test_merges_scanned_sides_and_keeps_telemetry_fields(self):
-        left = HidTagReading("left", 214, "214", "AB031246", 1000)
-        right = HidTagReading("right", 315, "315", "AB030000", 900)
+        left = HidTagReading("left", 44, "44", "AB031246", 1000)
+        right = HidTagReading("right", 80, "80", "AB030000", 900)
         snapshot = HidTagSnapshot(
             left=HidTagSideSnapshot(left, 0, False, True),
             right=HidTagSideSnapshot(right, 100, False, True),
@@ -83,9 +123,9 @@ class HidPosReceiverTests(unittest.TestCase):
             },
             snapshot,
         )
-        self.assertEqual(merged["left_tree_id"], 214)
-        self.assertEqual(merged["right_tree_id"], 315)
-        self.assertEqual(merged["current_tree_id"], 214)
+        self.assertEqual(merged["left_tree_id"], 44)
+        self.assertEqual(merged["right_tree_id"], 80)
+        self.assertEqual(merged["current_tree_id"], 44)
         self.assertEqual(merged["camera_side"], 1)
         self.assertEqual(merged["route_index"], 4)
         self.assertEqual(merged["source"], "mixed_hid_pos")
@@ -98,7 +138,7 @@ class HidPosReceiverTests(unittest.TestCase):
         self.assertIsNone(merge_hid_tag_tree_data(None, snapshot))
 
     def test_stale_tags_clear_previous_tree_ids_in_base_data(self):
-        reading = HidTagReading("left", 214, "214", "AB031246", 1000)
+        reading = HidTagReading("left", 44, "44", "AB031246", 1000)
         snapshot = HidTagSnapshot(
             left=HidTagSideSnapshot(reading, 30 * 60 * 1000, True, False),
             right=HidTagSideSnapshot.empty(),
@@ -106,10 +146,10 @@ class HidPosReceiverTests(unittest.TestCase):
 
         result = merge_hid_tag_tree_data(
             {
-                "current_tree_id": 214,
-                "left_tree_id": 214,
-                "right_tree_id": 315,
-                "tree_code": "ID0214",
+                "current_tree_id": 44,
+                "left_tree_id": 44,
+                "right_tree_id": 80,
+                "tree_code": "ID0044",
             },
             snapshot,
         )
@@ -132,7 +172,7 @@ class HidPosReceiverTests(unittest.TestCase):
         self.assertEqual(result["right_tree_id"], 10)
 
     def test_hid_mode_overrides_only_scanned_side(self):
-        left = HidTagReading("left", 214, "214", "AB031246", 1000)
+        left = HidTagReading("left", 44, "44", "AB031246", 1000)
         snapshot = HidTagSnapshot(
             left=HidTagSideSnapshot(left, 0, False, True),
             right=HidTagSideSnapshot.empty(),
@@ -142,8 +182,8 @@ class HidPosReceiverTests(unittest.TestCase):
             snapshot,
             hid_only=False,
         )
-        self.assertEqual(result["current_tree_id"], 214)
-        self.assertEqual(result["left_tree_id"], 214)
+        self.assertEqual(result["current_tree_id"], 44)
+        self.assertEqual(result["left_tree_id"], 44)
         self.assertEqual(result["right_tree_id"], 10)
         self.assertEqual(result["source"], "mixed_hid_pos")
 
@@ -153,7 +193,7 @@ class HidPosReceiverTests(unittest.TestCase):
             "left_tree_id": 9,
             "right_tree_id": 10,
         }
-        left = HidTagReading("left", 214, "214", "AB031246", 1000)
+        left = HidTagReading("left", 44, "44", "AB031246", 1000)
         snapshot = HidTagSnapshot(
             left=HidTagSideSnapshot(left, 0, False, True),
             right=HidTagSideSnapshot.empty(),

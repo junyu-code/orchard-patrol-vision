@@ -37,6 +37,44 @@ TREE_SIDES = ("left", "right")
 DEFAULT_TAG_PATTERN = r"^(?:TREE[:_-]?)?(?P<tree_id>\d{1,5})$"
 WINDOWS_POS_INTERFACE_GUID = "c243ffbd-3afc-45e9-b3d3-2ba18bc7ebc5"
 
+# 当前果园二维码编号到列号的固定映射。列号用于判断左右扫描器来源，
+# 不改变二维码本身的树号。
+TREE_COLUMN_RANGES = (
+    (1, 42, 1),
+    (43, 77, 2),
+    (78, 121, 3),
+    (122, 156, 4),
+)
+# 扫描开始前的默认相邻列：右侧第 1 列、左侧第 2 列。
+INITIAL_TREE_COLUMN_BY_SIDE = {"left": 2, "right": 1}
+
+
+def tree_column_for_id(tree_id: int) -> Optional[int]:
+    """返回二维码树号对应的列号；不在当前固定范围内时返回 ``None``。"""
+    value = int(tree_id)
+    for lower, upper, column in TREE_COLUMN_RANGES:
+        if lower <= value <= upper:
+            return column
+    return None
+
+
+def side_accepts_tree_column(side: str, column: int) -> bool:
+    """左侧只接受偶数列，右侧只接受奇数列。"""
+    if side not in TREE_SIDES:
+        raise ValueError(f"未知扫描器侧：{side!r}")
+    return column % 2 == (0 if side == "left" else 1)
+
+
+def adjacent_tree_columns(left_tree_id: int, right_tree_id: int) -> bool:
+    """判断左右树号是否落在相邻列；未知列号不参与该约束。"""
+    left_column = tree_column_for_id(left_tree_id)
+    right_column = tree_column_for_id(right_tree_id)
+    return (
+        left_column is None
+        or right_column is None
+        or abs(left_column - right_column) == 1
+    )
+
 
 class HidPosProtocolError(ValueError):
     """HID POS 输入报告或标签内容不符合约定。"""
@@ -220,6 +258,18 @@ def merge_hid_tag_tree_data(
                 "tag_serials": {},
             }
         return dict(base_tree_data) if base_tree_data is not None else None
+
+    # 防御性处理：外部构造的快照若出现不相邻列，丢弃时间较新的跳变结果，
+    # 保留旧的相邻范围结果。正常设备输入会在接收阶段提前拦截。
+    if len(active) == 2:
+        left_reading = next(reading for side, reading in active if side == "left")
+        right_reading = next(reading for side, reading in active if side == "right")
+        if not adjacent_tree_columns(left_reading.tree_id, right_reading.tree_id):
+            oldest_side, oldest_reading = min(
+                active,
+                key=lambda item: (item[1].received_at_ms, item[0] == "right"),
+            )
+            active = [(oldest_side, oldest_reading)]
 
     result = {} if hid_only else dict(base_tree_data or {})
     result.setdefault("left_tree_id", 0)
@@ -617,7 +667,26 @@ class DualHidPosReceiver:
             self._log_error_limited(side, str(exc))
             return False
 
+        column = tree_column_for_id(tree_id)
+        if column is None:
+            self._increment_stat("invalid_tags")
+            self._log_error_limited(
+                side,
+                f"二维码树号不在当前列范围内：{tree_id}（仅支持 1-156）",
+            )
+            return False
+        if not side_accepts_tree_column(side, column):
+            self._increment_stat("invalid_tags")
+            self._log_error_limited(
+                side,
+                f"{self._side_label(side)}仅接受{'偶数' if side == 'left' else '奇数'}列，"
+                f"当前为第{column}列（树号 {tree_id}）",
+            )
+            return False
+
         received_at_ms = int(self.clock_ms())
+        other_side = "right" if side == "left" else "left"
+
         reading = HidTagReading(
             side=side,
             tree_id=tree_id,
@@ -626,6 +695,26 @@ class DualHidPosReceiver:
             received_at_ms=received_at_ms,
         )
         with self._lock:
+            # 在同一把锁内完成相邻性检查和提交，避免左右扫码并发时
+            # 同时基于旧快照接受两个互不相邻的跳变结果。
+            other_reading = self._latest[other_side]
+            other_column = (
+                INITIAL_TREE_COLUMN_BY_SIDE[other_side]
+                if other_reading is None
+                else None
+            )
+            if other_reading is not None:
+                other_age_ms = max(0, received_at_ms - other_reading.received_at_ms)
+                if other_age_ms < self.stale_timeout_ms:
+                    other_column = tree_column_for_id(other_reading.tree_id)
+            if other_column is not None and abs(column - other_column) != 1:
+                self._stats["invalid_tags"] += 1
+                reject_message = (
+                    f"跳变到第{column}列，与{self._side_label(other_side)}"
+                    f"第{other_column}列不相邻，舍弃树号 {tree_id}"
+                )
+            else:
+                reject_message = None
             previous = self._latest[side]
             if (
                 previous is not None
@@ -634,6 +723,9 @@ class DualHidPosReceiver:
                 <= self.duplicate_interval_ms
             ):
                 self._stats["duplicate_tags"] += 1
+                return False
+            if reject_message is not None:
+                self._log_error_limited(side, reject_message)
                 return False
             self._latest[side] = reading
             self._stats["valid_tags"] += 1
