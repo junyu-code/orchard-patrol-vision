@@ -24,7 +24,9 @@ fi
 TELEMETRY_SERIAL_PORT="${TELEMETRY_SERIAL_PORT:-/dev/ttyUSB0}"
 TELEMETRY_SERIAL_BAUDRATE="${TELEMETRY_SERIAL_BAUDRATE:-9600}"
 DATA_MODE="${DATA_MODE:-debug}"
-APP_PRESET="${APP_PRESET:-client_b}"
+# 园区预设：显式设置 APP_PRESET 环境变量时才覆盖；未设置时由
+# config/app_config.py 的 ACTIVE_PRESET 决定（当前默认 client_a 恭城）。
+APP_PRESET="${APP_PRESET:-}"
 CAMERA_SOURCE="${CAMERA_LEFT_SOURCE:-}"
 if [ -z "${CAMERA_SOURCE}" ]; then
     for candidate in /dev/v4l/by-path/*-video-index0; do
@@ -36,7 +38,6 @@ if [ -z "${CAMERA_SOURCE}" ]; then
 fi
 CAMERA_SOURCE="${CAMERA_SOURCE:-/dev/video0}"
 MAIN_ARGS=(
-    --preset "${APP_PRESET}"
     --data-mode "${DATA_MODE}"
     --source "${CAMERA_SOURCE}"
     --auto-start
@@ -45,6 +46,10 @@ MAIN_ARGS=(
     --telemetry-baudrate "${TELEMETRY_SERIAL_BAUDRATE}"
     --no-telemetry-auto-detect
 )
+# 仅在显式指定 APP_PRESET 时传 --preset，避免覆盖配置文件的默认园区
+if [ -n "${APP_PRESET}" ]; then
+    MAIN_ARGS=( --preset "${APP_PRESET}" "${MAIN_ARGS[@]}" )
+fi
 
 # 4. 日志配置
 LOG_DIR="${PROJECT_DIR}/logs"
@@ -124,7 +129,7 @@ export PYTHONUNBUFFERED=1
 
 # 7. 启动程序
 echo "[$(date)] 正在使用环境: ${PYTHON_BIN} 启动程序..." >> "${LOG_FILE}"
-echo "[$(date)] 业务预设: ${APP_PRESET}" >> "${LOG_FILE}"
+echo "[$(date)] 业务预设: ${APP_PRESET:-config默认}" >> "${LOG_FILE}"
 echo "[$(date)] 电控遥测串口: ${TELEMETRY_SERIAL_PORT} @ ${TELEMETRY_SERIAL_BAUDRATE}" >> "${LOG_FILE}"
 echo "[$(date)] 数据模式: ${DATA_MODE}" >> "${LOG_FILE}"
 
