@@ -38,7 +38,7 @@ ORCHARD_ENDPOINTS = {
         "RTMP": (
             {
                 "label": "自定义 RTMP（可编辑）",
-                "url": os.getenv("CLIENT_A_RTMP_URL", ""),
+                "url": os.getenv("CLIENT_A_RTMP_URL", "rtmp://sip.jdny.hhzzss.cn:21935/116/D13Z94P4P30H?sign=41db35390ddad33f83944f44b8b75ded"),
             },
         ),
     },
@@ -87,11 +87,12 @@ PRESET_CONFIGS = {
         "ENABLE_HTTP": True,
         "HTTP_URL": "https://api.jdpm.hhzzss.cn/agriculture/position/robotPost",
         "ENABLE_RTMP": True,
-        "RTMP_URL": os.getenv("CLIENT_A_RTMP_URL", ""),
+        "RTMP_URL": os.getenv("CLIENT_A_RTMP_URL", "rtmp://sip.jdny.hhzzss.cn:21935/116/D13Z94P4P30H?sign=41db35390ddad33f83944f44b8b75ded"),
         "ENABLE_UDP": False,
         "UDP_HOST": "",
         "UDP_PORT": 0,
         "RAW_STREAM_ONLY": False,
+        "RTMP_FRAME_SOURCE": "window",  # 恭城默认推 PyQt5 实时界面画面
         "SIMULATE_TREE_EVENTS": False,
         "ENABLE_PATROL_TIMELINE": False,
     },
@@ -113,6 +114,7 @@ PRESET_CONFIGS = {
         "UDP_ORCHARD_ID": "vineyard1",
         "UDP_ADD_ORCHARD_PREFIX": True,
         "RAW_STREAM_ONLY": True,
+        "RTMP_FRAME_SOURCE": "camera",
         "SIMULATE_TREE_EVENTS": False,
         "ENABLE_PATROL_TIMELINE": True,
         "PATROL_SOURCE_NAME": "test0_push.mp4",
@@ -181,7 +183,7 @@ PRESET_CONFIGS = {
 }
 
 # 在这里选择默认配置：'client_a' | 'client_b' | 'both'
-ACTIVE_PRESET = "client_b"
+ACTIVE_PRESET = "client_a"  # 恭城柑桔果园；client_a 预设 RAW_STREAM_ONLY=False，默认启用模型检测
 PRESET_NAMES = tuple(PRESET_CONFIGS.keys())
 
 BASE_CONFIG = {
@@ -250,6 +252,9 @@ BASE_CONFIG = {
     "IOU_THRES": 0.45,
     "IMG_SIZE": 640,
     "RAW_STREAM_ONLY": False,
+    "RTMP_FRAME_SOURCE": "camera",  # RTMP 推流画面：camera=摄像头原始帧 | window=PyQt5 界面画面
+    "RTMP_WINDOW_WIDTH": 800,  # window 界面推流目标宽度（匹配平台 800x625）
+    "RTMP_WINDOW_HEIGHT": 625,  # window 界面推流目标高度（匹配平台 800x625）
     "LOOP_SOURCE": True,
     "CAMERA_RECONNECT_INTERVAL": 1.0,
 

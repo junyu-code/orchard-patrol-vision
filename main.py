@@ -480,6 +480,7 @@ class DetThread(QThread):
         self.serial_sender = None
         self.http_sender = None
         self.rtmp_sender = None
+        self.window_frame = None  # UI 线程注入的 PyQt5 界面帧（RTMP_FRAME_SOURCE=window 时用于推流）
         self.udp_sender = None
         self.telemetry_receiver = None
         self.gps_receiver = None
@@ -744,6 +745,10 @@ class DetThread(QThread):
         if self.cfg.get("PATROL_TIMELINE_DEBUG", False):
             print(f"   调试秒点: {event_times}")
         return timeline
+
+    def update_window_frame(self, frame):
+        """注入 PyQt5 界面截图帧，供 RTMP 界面推流模式使用（GIL 下引用赋值原子）。"""
+        self.window_frame = frame
 
     def _start_data_receivers(self):
         """按需启动真实遥测、旧 GPS 和 HID 标签接收线程。"""
@@ -1018,6 +1023,7 @@ class DetThread(QThread):
             push_w = push_h = push_fps = None
             active_rtmp_resolution = None
             active_rtmp_frame_rate = None
+            active_source_w = active_source_h = None
             stream_pacer = None
 
             while True:
@@ -1046,9 +1052,17 @@ class DetThread(QThread):
                         )
                     except ValueError:
                         requested_rtmp_frame_rate = "source"
+                    # 推流目标分辨率：window(界面)模式固定为 RTMP_WINDOW_WxH（匹配平台 800x625），
+                    # camera(摄像头)模式跟随摄像头帧尺寸
+                    if self.cfg.get("RTMP_FRAME_SOURCE") == "window":
+                        target_w = int(self.cfg.get("RTMP_WINDOW_WIDTH", 800))
+                        target_h = int(self.cfg.get("RTMP_WINDOW_HEIGHT", 625))
+                    else:
+                        target_h, target_w = im0s.shape[:2]
                     if (
                         requested_rtmp_resolution != active_rtmp_resolution
                         or requested_rtmp_frame_rate != active_rtmp_frame_rate
+                        or (target_w, target_h) != (active_source_w, active_source_h)
                     ):
                         if self.rtmp_sender.is_running:
                             self.rtmp_sender.stop()
@@ -1057,9 +1071,10 @@ class DetThread(QThread):
                         push_w = push_h = push_fps = None
                         active_rtmp_resolution = requested_rtmp_resolution
                         active_rtmp_frame_rate = requested_rtmp_frame_rate
+                        active_source_w, active_source_h = target_w, target_h
 
                     if push_w is None or push_h is None or push_fps is None:
-                        h, w = im0s.shape[:2]
+                        h, w = target_h, target_w
                         push_w, push_h = resolve_stream_size(
                             w,
                             h,
@@ -1552,7 +1567,16 @@ class DetThread(QThread):
                     if stream_pacer is not None:
                         stream_pacer.wait()
                     if rtmp_initialized:
-                        frame_to_push = resize_frame_for_stream(im0s, push_w, push_h)
+                        if (
+                            self.cfg.get("RTMP_FRAME_SOURCE") == "window"
+                            and self.window_frame is not None
+                        ):
+                            # 推 PyQt5 实时界面画面（由 UI 主线程定时注入）
+                            frame_to_push = resize_frame_for_stream(
+                                self.window_frame, push_w, push_h
+                            )
+                        else:
+                            frame_to_push = resize_frame_for_stream(im0s, push_w, push_h)
                         if not self.rtmp_sender.send_frame(frame_to_push):
                             rtmp_initialized = False
                             retry_interval = float(
@@ -1596,6 +1620,9 @@ class MainWindow(QMainWindow, Ui_mainWindow):
         self.camera_reconnect_timer = QTimer(self)
         self.camera_reconnect_timer.setSingleShot(True)
         self.camera_reconnect_timer.timeout.connect(self._restart_camera_detection)
+        self.window_frame_timer = QTimer(self)
+        self.window_frame_timer.timeout.connect(self._publish_window_frame)
+        self.window_frame_timer.start(40)  # 25fps；仅 RTMP_FRAME_SOURCE=window 时抓取界面帧
         self.hid_tag_status_timer = QTimer(self)
         self.hid_tag_status_timer.setInterval(250)
         self.hid_tag_status_timer.timeout.connect(self.refresh_hid_tag_status)
@@ -2348,6 +2375,7 @@ QPushButton#modelDetectionButton:hover {
             "RTMP_URL_LEFT", "RTMP_URL_RIGHT", "SENSOR_ID", "ENABLE_PATROL_TIMELINE",
             "PATROL_SOURCE_NAME", "PATROL_TREE_TIMES", "PATROL_START_TREE_ID",
             "PATROL_TIMELINE_DEBUG", "UDP_TREE_EVENT_DEBUG", "PINGPONG_SOURCE",
+            "RTMP_FRAME_SOURCE",
         )
         for key in preset_keys:
             if key in selected:
@@ -2671,6 +2699,20 @@ QPushButton#recordButton[recording="true"] {
             height, image.bytesPerLine() // 4, 4
         )[:, :width]
         return cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGR)
+
+    def _publish_window_frame(self):
+        """周期抓取 PyQt5 界面画面并注入推流线程（client_a 默认推界面）。"""
+        if self._closing:
+            return
+        if self.cfg.get("RTMP_FRAME_SOURCE") != "window":
+            return
+        frame = self.capture_window_frame()
+        if frame is None:
+            return
+        if self.det_thread is not None:
+            self.det_thread.update_window_frame(frame)
+        if self.right_det_thread is not None:
+            self.right_det_thread.update_window_frame(frame)
 
     def handle_raw_frame(self, frame):
         self.latest_raw_frame = frame.copy()
