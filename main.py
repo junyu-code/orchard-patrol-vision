@@ -2021,11 +2021,11 @@ QFrame[role="divider"] {
         for key in self.realtime_name_labels:
             self.set_realtime_source(key, "unavailable")
 
-        self.verticalLayout_7.insertWidget(2, self.dataPanel)
+        self.verticalLayout_7.insertWidget(0, self.dataPanel)
         self.setup_stream_resolution_control()
         # 实时遥测优先显示，阈值等低频设置放在其后，需要时可向下滚动。
         self.verticalLayout_8.removeItem(self.verticalLayout_7)
-        self.verticalLayout_8.insertLayout(3, self.verticalLayout_7)
+        self.verticalLayout_8.insertLayout(0, self.verticalLayout_7)
         self.resultWidget.setMinimumHeight(84)
         self.resultWidget.setMaximumHeight(120)
         self.resultWidget.setStyleSheet("""
