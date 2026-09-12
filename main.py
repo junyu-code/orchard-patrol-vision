@@ -1606,7 +1606,13 @@ class MainWindow(QMainWindow, Ui_mainWindow):
     def __init__(self, config=None, parent=None):
         super(MainWindow, self).__init__(parent)
         self.setupUi(self)
-        self.showMaximized()# 启动时默认最大化窗口（全屏效果） 
+        # 启动窗口：默认固定 800x625（与推流目标比例一致，界面画面无黑边）；
+        # 配置 WINDOW_START_MAXIMIZED=True 时启动最大化（推流画面将带黑边）
+        _start_max = (config or CONFIG).get("WINDOW_START_MAXIMIZED", False)
+        if _start_max:
+            self.showMaximized()
+        else:
+            self.resize(800, 625)
         self.cfg = config if config else CONFIG
         self.m_flag = False
         self._closing = False

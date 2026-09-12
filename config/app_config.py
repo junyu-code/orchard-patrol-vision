@@ -255,6 +255,7 @@ BASE_CONFIG = {
     "RTMP_FRAME_SOURCE": "camera",  # RTMP 推流画面：camera=摄像头原始帧 | window=PyQt5 界面画面
     "RTMP_WINDOW_WIDTH": 800,  # window 界面推流目标宽度（匹配平台 800x625）
     "RTMP_WINDOW_HEIGHT": 625,  # window 界面推流目标高度（匹配平台 800x625）
+    "WINDOW_START_MAXIMIZED": False,  # True=启动最大化全屏（推流画面有黑边）；False=固定800x625横窗（与平台匹配）
     "LOOP_SOURCE": True,
     "CAMERA_RECONNECT_INTERVAL": 1.0,
 
