@@ -1923,15 +1923,7 @@ QFrame[role="divider"] {
         data_layout.setVerticalSpacing(6)
         data_layout.setColumnStretch(1, 1)
 
-        # 不保留面板标题行：仅右上角保留数据源状态点（●）
-        self.data_source_badge = QLabel("●", self.dataPanel)
-        self.data_source_badge.setProperty("role", "modeBadge")
-        self.data_source_badge.setProperty("source", "waiting")
-        self.data_source_badge.setToolTip("等待数据")
-        self.data_source_badge.setFixedSize(20, 20)
-        self.data_source_badge.setAlignment(Qt.AlignCenter)
-        data_layout.addWidget(self.data_source_badge, 0, 1, Qt.AlignRight)
-
+        # 无标题、无状态点：数据区直接从 GPS 坐标开始（节省空间，适配 800x625 窗口）
         gps_name = QLabel("GPS 坐标", self.dataPanel)
         gps_name.setProperty("role", "fieldName")
         gps_value = QLabel(EMPTY_VALUE, self.dataPanel)
@@ -3061,20 +3053,6 @@ QPushButton:pressed {
                 key, view["field_sources"].get(key, "unknown")
             )
 
-        self.data_source_badge.setText("●")
-        source_tooltips = {
-            "real": "真实遥测正常",
-            "virtual": "当前使用虚拟数据",
-            "mixed": "真实数据优先，部分字段由虚拟数据补齐",
-            "waiting": "等待数据",
-            "unknown": "状态未知",
-        }
-        self.data_source_badge.setToolTip(
-            source_tooltips.get(view["data_source"], "数据状态正常")
-        )
-        self.data_source_badge.setProperty("source", view["data_source"])
-        self.data_source_badge.style().unpolish(self.data_source_badge)
-        self.data_source_badge.style().polish(self.data_source_badge)
 
     def show_statistic(self, statistic_dic):
         self.resultWidget.clear()
