@@ -1923,9 +1923,7 @@ QFrame[role="divider"] {
         data_layout.setVerticalSpacing(6)
         data_layout.setColumnStretch(1, 1)
 
-        panel_title = QLabel("实时数据", self.dataPanel)
-        panel_title.setProperty("role", "panelTitle")
-        data_layout.addWidget(panel_title, 0, 0)
+        # 不保留面板标题行：仅右上角保留数据源状态点（●）
         self.data_source_badge = QLabel("●", self.dataPanel)
         self.data_source_badge.setProperty("role", "modeBadge")
         self.data_source_badge.setProperty("source", "waiting")
