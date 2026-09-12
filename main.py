@@ -1923,7 +1923,7 @@ QFrame[role="divider"] {
         data_layout.setVerticalSpacing(6)
         data_layout.setColumnStretch(1, 1)
 
-        panel_title = QLabel("实时遥测", self.dataPanel)
+        panel_title = QLabel("实时数据", self.dataPanel)
         panel_title.setProperty("role", "panelTitle")
         data_layout.addWidget(panel_title, 0, 0)
         self.data_source_badge = QLabel("●", self.dataPanel)
@@ -1966,6 +1966,7 @@ QFrame[role="divider"] {
             "work_mode": "检测方式和真实/调试/仿真数据模式",
             "frame_index": "视觉主机当前处理的视频帧序号",
             "disease_count": "当前帧识别到的病害目标总数",
+            "disease_detail": "当前帧检测到的病害类别、数量与置信度",
             "channels": "本次运行已经启用的数据与平台通道",
         }
         for section_title, fields in (
@@ -1983,6 +1984,7 @@ QFrame[role="divider"] {
                 ("work_mode", "任务模式"),
                 ("frame_index", "当前帧"),
                 ("disease_count", "识别目标"),
+                ("disease_detail", "病害明细"),
                 ("left_fps", "左路FPS"),
                 ("right_fps", "右路FPS"),
                 ("channels", "数据链路"),

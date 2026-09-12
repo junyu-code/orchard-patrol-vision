@@ -66,6 +66,24 @@ def format_count(value, suffix=" 个"):
         return EMPTY_VALUE
 
 
+def format_disease_detail(diseases):
+    """格式化三类病害的检出数量与置信度；无检出时显示未检出。"""
+    if not diseases:
+        return EMPTY_VALUE
+    parts = []
+    for name in ("溃疡病", "黄龙病", "炭疽病"):
+        info = diseases.get(name) or {}
+        count = info.get("count")
+        if not has_realtime_value(count) or int(count) <= 0:
+            continue
+        confidence = info.get("confidence")
+        if has_realtime_value(confidence):
+            parts.append(f"{name} x{int(count)} ({float(confidence):.0%})")
+        else:
+            parts.append(f"{name} x{int(count)}")
+    return "\n".join(parts) if parts else "未检出"
+
+
 def format_battery(soc, voltage):
     """只拼接真实存在的电池字段。"""
     parts = []
@@ -154,6 +172,7 @@ def build_realtime_view(data):
             else EMPTY_VALUE
         ),
         "disease_count": format_count(data.get("disease_count")),
+        "disease_detail": format_disease_detail(data.get("diseases")),
         "tree": format_tree_event(tree_event),
         "velocity": format_number(status.get("velocity"), decimals=2, suffix=" m/s"),
         "azimuth": format_number(status.get("azimuth"), decimals=0, suffix="°"),
@@ -198,6 +217,8 @@ def build_realtime_view(data):
             source = "unavailable"
         elif field == "gps":
             source = gps_field_source
+        elif field in ("disease_detail", "disease_count"):
+            source = "real" 
         if source not in FIELD_SOURCE_STATES:
             source = "unknown"
         field_sources[field] = source
