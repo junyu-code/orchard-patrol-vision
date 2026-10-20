@@ -43,6 +43,7 @@ ORCHARD_ENDPOINTS = {
         ),
     },
     "兴安葡萄园": {
+        "orchard_id": "vineyard1",
         "HTTP": (),
         "UDP": (
             {"label": "统一平台 UDP（1.14.205.24:4926）", "host": "1.14.205.24", "port": 4926},
@@ -56,16 +57,16 @@ ORCHARD_ENDPOINTS = {
         ),
     },
     "农科所橘子园": {
+        "orchard_id": "orchard3",
         "HTTP": (),
         "UDP": (
             {"label": "统一平台 UDP（1.14.205.24:4926）", "host": "1.14.205.24", "port": 4926},
         ),
-        # 与葡萄园共用服务器，仅去掉 vineyard1_ 前缀。
         "RTMP": tuple(
             {"label": name, "url": url}
             for name, url in (
-                ("左路视频", "rtmp://gl.xsjny.com/live/robot1_sensor1"),
-                ("右路视频", "rtmp://gl.xsjny.com/live/robot1_sensor2"),
+                ("左路视频", "rtmp://gl.xsjny.com/live/py_orchard1_robot1_sensor1"),
+                ("右路视频", "rtmp://gl.xsjny.com/live/py_orchard1_robot1_sensor2"),
             )
         ),
     },
@@ -183,12 +184,15 @@ PRESET_CONFIGS = {
 }
 
 # 在这里选择默认配置：'client_a' | 'client_b' | 'both'
-ACTIVE_PRESET = "client_a"  # 恭城柑桔果园；client_a 预设 RAW_STREAM_ONLY=False，默认启用模型检测
+# 默认启动农科所橘子园；命令行仍兼容 client_a/client_b/both 历史预设。
+ACTIVE_PRESET = "农科所橘子园"
 PRESET_NAMES = tuple(PRESET_CONFIGS.keys())
 
 BASE_CONFIG = {
     "PRESET_NAME": ACTIVE_PRESET,
-    "ORCHARD_NAME": "兴安葡萄园" if ACTIVE_PRESET == "client_b" else "恭城柑桔果园",
+    "ORCHARD_NAME": ACTIVE_PRESET if ACTIVE_PRESET in ORCHARD_NAMES else (
+        "兴安葡萄园" if ACTIVE_PRESET == "client_b" else "恭城柑桔果园"
+    ),
     "DATA_MODE": DATA_MODE,
     "DATA_PROTOCOL": "UDP" if ACTIVE_PRESET == "client_b" else "HTTP",
     "VIDEO_PROTOCOL": "RTMP",
@@ -325,6 +329,11 @@ def build_config(preset_name=None):
         video_endpoint = endpoint_config.get("RTMP", ())
         if video_endpoint:
             config["RTMP_URL"] = video_endpoint[0].get("url", "")
+            if len(video_endpoint) > 1:
+                config["RTMP_URL_RIGHT"] = video_endpoint[1].get("url", "")
+        orchard_id = endpoint_config.get("orchard_id")
+        if orchard_id:
+            config["UDP_ORCHARD_ID"] = orchard_id
         if not config.get("RTMP_URL"):
             # 恭城果园的图片随 HTTP JSON 上传，没有独立 RTMP 视频流。
             config["ENABLE_RTMP"] = False
