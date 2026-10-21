@@ -9,11 +9,24 @@ from copy import deepcopy
 
 from transport.camera_capabilities import default_camera_source, secondary_camera_source
 from config.defaults import (
+    DEFAULT_ORCHARD_NAME,
+    DEFAULT_PLAYBACK_RATE_FPS,
+    DEFAULT_PRESET,
+    DEFAULT_RAW_FRAME_TARGET_FPS,
+    DEFAULT_RTMP_BUFSIZE,
+    DEFAULT_RTMP_FRAME_RATE,
+    DEFAULT_RTMP_MAXRATE,
+    DEFAULT_RTMP_MAX_FPS,
+    DEFAULT_RTMP_MAX_WIDTH,
+    DEFAULT_RTMP_RESOLUTION,
+    DEFAULT_RTMP_VIDEO_BITRATE,
     GONGCHENG_HTTP_URL,
     GONGCHENG_RTMP_URL,
     GONGCHENG_UDP_HOST,
     GONGCHENG_UDP_PORT,
     NONGKESUO_ORCHARD_ID,
+    NONGKESUO_UDP_HOST,
+    NONGKESUO_UDP_PORT,
     NONGKESUO_RTMP_LEFT,
     NONGKESUO_RTMP_RIGHT,
     XINGAN_ORCHARD_ID,
@@ -81,7 +94,7 @@ ORCHARD_ENDPOINTS = {
     "农科所橘子园": {
         "HTTP": (),
         "UDP": (
-            {"label": f"统一平台 UDP（{XINGAN_UDP_HOST}:{XINGAN_UDP_PORT}）", "host": XINGAN_UDP_HOST, "port": XINGAN_UDP_PORT},
+            {"label": f"统一平台 UDP（{NONGKESUO_UDP_HOST}:{NONGKESUO_UDP_PORT}）", "host": NONGKESUO_UDP_HOST, "port": NONGKESUO_UDP_PORT},
         ),
         # 与葡萄园共用服务器，仅去掉 vineyard1_ 前缀。
         "RTMP": tuple(
@@ -146,14 +159,14 @@ PRESET_CONFIGS = {
         "PATROL_TIMELINE_DEBUG": False,
         "UDP_TREE_EVENT_DEBUG": False,
         "PINGPONG_SOURCE": True,
-        "RTMP_MAX_WIDTH": 1280,
-        "RTMP_RESOLUTION": "source",
-        "RTMP_MAX_FPS": 0,
-        "RTMP_VIDEO_BITRATE": "3000k",
-        "RTMP_MAXRATE": "3600k",
-        "RTMP_BUFSIZE": "6000k",
-        "RAW_FRAME_TARGET_FPS": 0,
-        "PLAYBACK_RATE_FPS": 0,
+        "RTMP_MAX_WIDTH": DEFAULT_RTMP_MAX_WIDTH,
+        "RTMP_RESOLUTION": DEFAULT_RTMP_RESOLUTION,
+        "RTMP_MAX_FPS": DEFAULT_RTMP_MAX_FPS,
+        "RTMP_VIDEO_BITRATE": DEFAULT_RTMP_VIDEO_BITRATE,
+        "RTMP_MAXRATE": DEFAULT_RTMP_MAXRATE,
+        "RTMP_BUFSIZE": DEFAULT_RTMP_BUFSIZE,
+        "RAW_FRAME_TARGET_FPS": DEFAULT_RAW_FRAME_TARGET_FPS,
+        "PLAYBACK_RATE_FPS": DEFAULT_PLAYBACK_RATE_FPS,
         "RTMP_TIMESTAMP_OVERLAY": True,
         "RTMP_TIME_STANDARD": "utc+8",
         "UDP_TIME_STANDARD": "utc+8",
@@ -167,12 +180,12 @@ PRESET_CONFIGS = {
 }
 
 # 在这里选择默认配置：'client_a' | 'client_b'
-ACTIVE_PRESET = "client_a"  # 恭城柑桔果园；client_a 预设 RAW_STREAM_ONLY=False，默认启用模型检测
+ACTIVE_PRESET = DEFAULT_PRESET  # 默认果园和预设见 config/defaults.py
 PRESET_NAMES = tuple(PRESET_CONFIGS.keys())
 
 BASE_CONFIG = {
     "PRESET_NAME": ACTIVE_PRESET,
-    "ORCHARD_NAME": "兴安葡萄园" if ACTIVE_PRESET == "client_b" else "恭城柑桔果园",
+    "ORCHARD_NAME": DEFAULT_ORCHARD_NAME,
     "DATA_MODE": DATA_MODE,
     "DATA_PROTOCOL": "UDP" if ACTIVE_PRESET == "client_b" else "HTTP",
     "VIDEO_PROTOCOL": "RTMP",
@@ -244,15 +257,15 @@ BASE_CONFIG = {
     "CAMERA_RECONNECT_INTERVAL": 1.0,
 
     # RTMP 推流配置
-    "RTMP_MAX_WIDTH": 1280,
-    "RTMP_RESOLUTION": "source",
-    "RTMP_MAX_FPS": 0,
-    "RTMP_FRAME_RATE": "source",
-    "RTMP_VIDEO_BITRATE": "3000k",
-    "RTMP_MAXRATE": "3600k",
-    "RTMP_BUFSIZE": "6000k",
-    "RAW_FRAME_TARGET_FPS": 0,
-    "PLAYBACK_RATE_FPS": 0,
+    "RTMP_MAX_WIDTH": DEFAULT_RTMP_MAX_WIDTH,
+    "RTMP_RESOLUTION": DEFAULT_RTMP_RESOLUTION,
+    "RTMP_MAX_FPS": DEFAULT_RTMP_MAX_FPS,
+    "RTMP_FRAME_RATE": DEFAULT_RTMP_FRAME_RATE,
+    "RTMP_VIDEO_BITRATE": DEFAULT_RTMP_VIDEO_BITRATE,
+    "RTMP_MAXRATE": DEFAULT_RTMP_MAXRATE,
+    "RTMP_BUFSIZE": DEFAULT_RTMP_BUFSIZE,
+    "RAW_FRAME_TARGET_FPS": DEFAULT_RAW_FRAME_TARGET_FPS,
+    "PLAYBACK_RATE_FPS": DEFAULT_PLAYBACK_RATE_FPS,
     "RTMP_TIMESTAMP_OVERLAY": False,
     "RTMP_TIME_STANDARD": "local",
     "RTMP_RECONNECT_INTERVAL": 3.0,
@@ -284,7 +297,8 @@ BASE_CONFIG = {
 
 def build_config(preset_name=None):
     """构建运行配置，避免外部直接修改全局模板。"""
-    requested_name = preset_name or ACTIVE_PRESET
+    # 无参数启动时以 defaults.py 中的默认果园为准，确保只改一个地方即可切换目标。
+    requested_name = preset_name or DEFAULT_ORCHARD_NAME
     # 新界面使用园区中文名称；历史 client_* 键继续支持命令行和旧脚本。
     active_preset = ORCHARD_PRESET_KEYS.get(requested_name, requested_name)
     config = deepcopy(BASE_CONFIG)

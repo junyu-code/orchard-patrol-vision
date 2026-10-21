@@ -136,11 +136,13 @@ scripts\run-client-b-demo.bat
 
 A、B 两套历史业务共用同一个 `main.py` 运行时。界面启动后可在“园区”下拉框选择目标园区，程序会自动应用该园区的数据链路和视频地址；切换园区、相机或模型检测状态后，停止当前任务再重新启动即可使工作线程使用新配置。具体地址目录见 `docs/DUAL_CLIENT_GUIDE.md`。
 
-在 `config/app_config.py` 中修改：
+在 `config/defaults.py` 顶部修改默认运行目标和推流参数：
 
 ```python
-# 在这里选择默认配置；也支持下方三个园区名称
-ACTIVE_PRESET = "client_b"
+DEFAULT_ORCHARD_NAME = "恭城柑桔果园"
+DEFAULT_RTMP_MAX_WIDTH = 1280
+DEFAULT_RTMP_RESOLUTION = "source"
+DEFAULT_RTMP_VIDEO_BITRATE = "3000k"
 ```
 
 也可以通过命令行临时指定：

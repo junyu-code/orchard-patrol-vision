@@ -41,6 +41,8 @@ class PlatformPresetTests(unittest.TestCase):
     def test_nongkesuo_uses_orchard3_and_configured_streams(self):
         config = build_config("农科所橘子园")
 
+        self.assertEqual(config["UDP_HOST"], "1.14.205.24")
+        self.assertEqual(config["UDP_PORT"], 4926)
         self.assertEqual(config["UDP_ORCHARD_ID"], "orchard3")
         self.assertEqual(
             config["RTMP_URL"],

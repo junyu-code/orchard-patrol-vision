@@ -26,11 +26,13 @@
 
 ## 🔧 部署目标选择
 
-可以在 `config/app_config.py` 中修改 `ACTIVE_PRESET`，也可以在命令行或部署环境中覆盖：
+默认目标和推流参数集中在 `config/defaults.py` 文件顶部，也可以在命令行覆盖目标：
 
 ```python
-# 选择使用哪个配置：'client_a' | 'client_b'
-ACTIVE_PRESET = "client_b"  # 当前默认使用甲方B的配置
+DEFAULT_ORCHARD_NAME = "恭城柑桔果园"
+DEFAULT_RTMP_MAX_WIDTH = 1280
+DEFAULT_RTMP_RESOLUTION = "source"
+DEFAULT_RTMP_VIDEO_BITRATE = "3000k"
 ```
 
 命令行参数优先于代码中的默认值：
