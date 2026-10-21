@@ -8,6 +8,30 @@ import os
 from copy import deepcopy
 
 from transport.camera_capabilities import default_camera_source, secondary_camera_source
+from config.defaults import (
+    BOTH_RTMP_LEFT,
+    BOTH_RTMP_RIGHT,
+    GONGCHENG_HTTP_URL,
+    GONGCHENG_RTMP_URL,
+    GONGCHENG_UDP_HOST,
+    GONGCHENG_UDP_PORT,
+    NONGKESUO_RTMP_LEFT,
+    NONGKESUO_RTMP_RIGHT,
+    XINGAN_ORCHARD_ID,
+    XINGAN_RTMP_LEFT,
+    XINGAN_RTMP_RIGHT,
+    XINGAN_UDP_HOST,
+    XINGAN_UDP_PORT,
+)
+
+
+# 保留旧导出名，兼容现有外部脚本和测试。
+GONGCHENG_DEFAULT_RTMP_URL = GONGCHENG_RTMP_URL
+
+
+def _gongcheng_rtmp_url():
+    """读取恭城推流地址；环境变量只在构建配置时覆盖默认值。"""
+    return os.getenv("CLIENT_A_RTMP_URL") or GONGCHENG_RTMP_URL
 
 
 # 界面显示名称与历史命令行预设的映射。保留旧键，避免已有脚本失效。
@@ -29,43 +53,43 @@ ORCHARD_ENDPOINTS = {
         "HTTP": (
             {
                 "label": "柑桔平台 HTTP",
-                "url": "https://api.jdpm.hhzzss.cn/agriculture/position/robotPost",
+                "url": GONGCHENG_HTTP_URL,
             },
         ),
         "UDP": (
-            {"label": "旧平台 UDP（43.139.69.203:10088）", "host": "43.139.69.203", "port": 10088},
+            {"label": f"旧平台 UDP（{GONGCHENG_UDP_HOST}:{GONGCHENG_UDP_PORT}）", "host": GONGCHENG_UDP_HOST, "port": GONGCHENG_UDP_PORT},
         ),
         "RTMP": (
             {
                 "label": "自定义 RTMP（可编辑）",
-                "url": os.getenv("CLIENT_A_RTMP_URL", "rtmp://sip.jdny.hhzzss.cn:21935/116/D13Z94P4P30H?sign=41db35390ddad33f83944f44b8b75ded"),
+                "url": _gongcheng_rtmp_url(),
             },
         ),
     },
     "兴安葡萄园": {
         "HTTP": (),
         "UDP": (
-            {"label": "统一平台 UDP（1.14.205.24:4926）", "host": "1.14.205.24", "port": 4926},
+            {"label": f"统一平台 UDP（{XINGAN_UDP_HOST}:{XINGAN_UDP_PORT}）", "host": XINGAN_UDP_HOST, "port": XINGAN_UDP_PORT},
         ),
         "RTMP": tuple(
             {"label": name, "url": url}
             for name, url in (
-                ("左路视频", "rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor1"),
-                ("右路视频", "rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor2"),
+                ("左路视频", XINGAN_RTMP_LEFT),
+                ("右路视频", XINGAN_RTMP_RIGHT),
             )
         ),
     },
     "农科所橘子园": {
         "HTTP": (),
         "UDP": (
-            {"label": "统一平台 UDP（1.14.205.24:4926）", "host": "1.14.205.24", "port": 4926},
+            {"label": f"统一平台 UDP（{XINGAN_UDP_HOST}:{XINGAN_UDP_PORT}）", "host": XINGAN_UDP_HOST, "port": XINGAN_UDP_PORT},
         ),
         # 与葡萄园共用服务器，仅去掉 vineyard1_ 前缀。
         "RTMP": tuple(
             {"label": name, "url": url}
             for name, url in (
-                ("左路视频", "rtmp://gl.xsjny.com/live/robot1_sensor1"),
-                ("右路视频", "rtmp://gl.xsjny.com/live/robot1_sensor2"),
+                ("左路视频", NONGKESUO_RTMP_LEFT),
+                ("右路视频", NONGKESUO_RTMP_RIGHT),
             )
         ),
     },
@@ -85,9 +109,9 @@ PRESET_CONFIGS = {
     # 甲方A：原有的 HTTP + RTMP 系统
     "client_a": {
         "ENABLE_HTTP": True,
-        "HTTP_URL": "https://api.jdpm.hhzzss.cn/agriculture/position/robotPost",
+        "HTTP_URL": GONGCHENG_HTTP_URL,
         "ENABLE_RTMP": True,
-        "RTMP_URL": os.getenv("CLIENT_A_RTMP_URL", "rtmp://sip.jdny.hhzzss.cn:21935/116/D13Z94P4P30H?sign=41db35390ddad33f83944f44b8b75ded"),
+        "RTMP_URL": GONGCHENG_RTMP_URL,
         "ENABLE_UDP": False,
         "UDP_HOST": "",
         "UDP_PORT": 0,
@@ -103,15 +127,15 @@ PRESET_CONFIGS = {
         "HTTP_URL": "",
         "ENABLE_RTMP": True,
         # 当前进程推左路；右路可改用 RTMP_URL_RIGHT 或 --rtmp-url 覆盖。
-        "RTMP_URL": "rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor1",
-        "RTMP_URL_LEFT": "rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor1",
-        "RTMP_URL_RIGHT": "rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor2",
+        "RTMP_URL": XINGAN_RTMP_LEFT,
+        "RTMP_URL_LEFT": XINGAN_RTMP_LEFT,
+        "RTMP_URL_RIGHT": XINGAN_RTMP_RIGHT,
         "ROBOT_ID": 1,
         "SENSOR_ID": 1,
         "ENABLE_UDP": True,
-        "UDP_HOST": "1.14.205.24",
-        "UDP_PORT": 4926,
-        "UDP_ORCHARD_ID": "vineyard1",
+        "UDP_HOST": XINGAN_UDP_HOST,
+        "UDP_PORT": XINGAN_UDP_PORT,
+        "UDP_ORCHARD_ID": XINGAN_ORCHARD_ID,
         "UDP_ADD_ORCHARD_PREFIX": True,
         "RAW_STREAM_ONLY": True,
         "RTMP_FRAME_SOURCE": "camera",
@@ -144,14 +168,14 @@ PRESET_CONFIGS = {
     # 同时对接两家，主要用于联调测试
     "both": {
         "ENABLE_HTTP": True,
-        "HTTP_URL": "https://api.jdpm.hhzzss.cn/agriculture/position/robotPost",
+        "HTTP_URL": GONGCHENG_HTTP_URL,
         "ENABLE_RTMP": True,
-        "RTMP_URL": "rtmp://gl.xsjny.com/live/robot1_sensor1",
-        "RTMP_URL_LEFT": "rtmp://gl.xsjny.com/live/robot1_sensor1",
-        "RTMP_URL_RIGHT": "rtmp://gl.xsjny.com/live/robot1_sensor2",
+        "RTMP_URL": BOTH_RTMP_LEFT,
+        "RTMP_URL_LEFT": BOTH_RTMP_LEFT,
+        "RTMP_URL_RIGHT": BOTH_RTMP_RIGHT,
         "ENABLE_UDP": True,
-        "UDP_HOST": "1.14.205.24",
-        "UDP_PORT": 4926,
+        "UDP_HOST": XINGAN_UDP_HOST,
+        "UDP_PORT": XINGAN_UDP_PORT,
         "UDP_ORCHARD_ID": "orchard1",
         "UDP_ADD_ORCHARD_PREFIX": True,
         "RAW_STREAM_ONLY": True,
@@ -305,6 +329,8 @@ def build_config(preset_name=None):
     active_preset = ORCHARD_PRESET_KEYS.get(requested_name, requested_name)
     config = deepcopy(BASE_CONFIG)
     config.update(PRESET_CONFIGS.get(active_preset, PRESET_CONFIGS["client_a"]))
+    if active_preset == "client_a":
+        config["RTMP_URL"] = _gongcheng_rtmp_url()
     config["PRESET_NAME"] = active_preset
     # 主检测线程使用固定绑定的左路设备。
     config["SOURCE"] = config.get("CAMERA_SOURCE_LEFT", default_camera_source())
@@ -324,7 +350,13 @@ def build_config(preset_name=None):
                 config["UDP_PORT"] = int(selected_data.get("port", 0) or 0)
         video_endpoint = endpoint_config.get("RTMP", ())
         if video_endpoint:
-            config["RTMP_URL"] = video_endpoint[0].get("url", "")
+            config["RTMP_URL"] = (
+                _gongcheng_rtmp_url()
+                if requested_name == "恭城柑桔果园"
+                else video_endpoint[0].get("url", "")
+            )
+            if len(video_endpoint) > 1:
+                config["RTMP_URL_RIGHT"] = video_endpoint[1].get("url", "")
         if not config.get("RTMP_URL"):
             # 恭城果园的图片随 HTTP JSON 上传，没有独立 RTMP 视频流。
             config["ENABLE_RTMP"] = False
