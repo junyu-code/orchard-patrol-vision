@@ -21,9 +21,6 @@ XINGAN_RTMP_LEFT = "rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor1"
 XINGAN_RTMP_RIGHT = "rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor2"
 
 # 农科所橘子园
-NONGKESUO_RTMP_LEFT = "rtmp://gl.xsjny.com/live/robot1_sensor1"
-NONGKESUO_RTMP_RIGHT = "rtmp://gl.xsjny.com/live/robot1_sensor2"
-
-# 同时联调两套平台时使用的流名
-BOTH_RTMP_LEFT = "rtmp://gl.xsjny.com/live/robot1_sensor1"
-BOTH_RTMP_RIGHT = "rtmp://gl.xsjny.com/live/robot1_sensor2"
+NONGKESUO_ORCHARD_ID = "orchard3"
+NONGKESUO_RTMP_LEFT = "rtmp://gl.xsjny.com/live/py_orchard1_robot1_sensor1"
+NONGKESUO_RTMP_RIGHT = "rtmp://gl.xsjny.com/live/py_orchard1_robot1_sensor2"

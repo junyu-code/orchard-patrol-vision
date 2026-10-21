@@ -148,7 +148,6 @@ ACTIVE_PRESET = "client_b"
 ```bash
 python main.py --preset client_a
 python main.py --preset client_b
-python main.py --preset both
 python main.py --preset "恭城柑桔果园"
 python main.py --preset "兴安葡萄园"
 python main.py --preset "农科所橘子园"
@@ -161,9 +160,8 @@ python main.py --preset "农科所橘子园"
 | `client_a` / `恭城柑桔果园` | HTTP + 可选 RTMP |
 | `client_b` / `兴安葡萄园` | UDP + RTMP |
 | `农科所橘子园` | UDP + RTMP |
-| `both` | 同时开启 HTTP、UDP、RTMP，主要用于联调测试 |
 
-历史 `client_a`、`client_b`、`both` 参数继续兼容。启动后可在界面中配置：
+历史 `client_a`、`client_b` 参数继续兼容。启动后可在界面中配置：
 
 - 左路和右路相机固定绑定（Windows 设备号 0/1，Linux `/dev/video0`/`/dev/video1`）
 - 横向或纵向显示原图、检测结果

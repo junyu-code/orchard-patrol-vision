@@ -36,29 +36,5 @@ class StreamQualityConfigTests(unittest.TestCase):
             "rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor2",
         )
 
-    def test_combined_preset_uses_same_source_stream_profile(self):
-        client_b = build_config("client_b")
-        combined = build_config("both")
-
-        stream_keys = (
-            "RTMP_MAX_WIDTH",
-            "RTMP_RESOLUTION",
-            "RTMP_MAX_FPS",
-            "RTMP_FRAME_RATE",
-            "RTMP_VIDEO_BITRATE",
-            "RTMP_MAXRATE",
-            "RTMP_BUFSIZE",
-            "RAW_FRAME_TARGET_FPS",
-            "PLAYBACK_RATE_FPS",
-            "RTMP_TIMESTAMP_OVERLAY",
-            "RTMP_TIME_STANDARD",
-            "UDP_TIME_STANDARD",
-        )
-        self.assertEqual(
-            {key: combined[key] for key in stream_keys},
-            {key: client_b[key] for key in stream_keys},
-        )
-
-
 if __name__ == "__main__":
     unittest.main()

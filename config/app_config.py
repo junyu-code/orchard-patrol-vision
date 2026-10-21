@@ -9,12 +9,11 @@ from copy import deepcopy
 
 from transport.camera_capabilities import default_camera_source, secondary_camera_source
 from config.defaults import (
-    BOTH_RTMP_LEFT,
-    BOTH_RTMP_RIGHT,
     GONGCHENG_HTTP_URL,
     GONGCHENG_RTMP_URL,
     GONGCHENG_UDP_HOST,
     GONGCHENG_UDP_PORT,
+    NONGKESUO_ORCHARD_ID,
     NONGKESUO_RTMP_LEFT,
     NONGKESUO_RTMP_RIGHT,
     XINGAN_ORCHARD_ID,
@@ -165,48 +164,9 @@ PRESET_CONFIGS = {
         "SIM_BASE_LON": 110.34,
     },
 
-    # 同时对接两家，主要用于联调测试
-    "both": {
-        "ENABLE_HTTP": True,
-        "HTTP_URL": GONGCHENG_HTTP_URL,
-        "ENABLE_RTMP": True,
-        "RTMP_URL": BOTH_RTMP_LEFT,
-        "RTMP_URL_LEFT": BOTH_RTMP_LEFT,
-        "RTMP_URL_RIGHT": BOTH_RTMP_RIGHT,
-        "ENABLE_UDP": True,
-        "UDP_HOST": XINGAN_UDP_HOST,
-        "UDP_PORT": XINGAN_UDP_PORT,
-        "UDP_ORCHARD_ID": "orchard1",
-        "UDP_ADD_ORCHARD_PREFIX": True,
-        "RAW_STREAM_ONLY": True,
-        "SIMULATE_TREE_EVENTS": False,
-        "ENABLE_PATROL_TIMELINE": True,
-        "PATROL_SOURCE_NAME": "test0_push.mp4",
-        "PATROL_TREE_TIMES": [1, 5, 9, 13, 17, 22, 27, 31, 35, 39],
-        "PATROL_START_TREE_ID": 1,
-        "PATROL_TIMELINE_DEBUG": False,
-        "UDP_TREE_EVENT_DEBUG": False,
-        "PINGPONG_SOURCE": True,
-        "RTMP_MAX_WIDTH": 1280,
-        "RTMP_RESOLUTION": "source",
-        "RTMP_MAX_FPS": 0,
-        "RTMP_VIDEO_BITRATE": "3000k",
-        "RTMP_MAXRATE": "3600k",
-        "RTMP_BUFSIZE": "6000k",
-        "RAW_FRAME_TARGET_FPS": 0,
-        "PLAYBACK_RATE_FPS": 0,
-        "RTMP_TIMESTAMP_OVERLAY": True,
-        "RTMP_TIME_STANDARD": "utc+8",
-        "UDP_TIME_STANDARD": "utc+8",
-        "UDP_VERBOSE_LOG": True,
-        "UDP_LOG_INTERVAL": 5,
-        "USE_SYSTEM_LOCATION": False,
-        "SIM_BASE_LAT": 25.28,
-        "SIM_BASE_LON": 110.34,
-    },
 }
 
-# 在这里选择默认配置：'client_a' | 'client_b' | 'both'
+# 在这里选择默认配置：'client_a' | 'client_b'
 ACTIVE_PRESET = "client_a"  # 恭城柑桔果园；client_a 预设 RAW_STREAM_ONLY=False，默认启用模型检测
 PRESET_NAMES = tuple(PRESET_CONFIGS.keys())
 
@@ -357,6 +317,8 @@ def build_config(preset_name=None):
             )
             if len(video_endpoint) > 1:
                 config["RTMP_URL_RIGHT"] = video_endpoint[1].get("url", "")
+        if requested_name == "农科所橘子园":
+            config["UDP_ORCHARD_ID"] = NONGKESUO_ORCHARD_ID
         if not config.get("RTMP_URL"):
             # 恭城果园的图片随 HTTP JSON 上传，没有独立 RTMP 视频流。
             config["ENABLE_RTMP"] = False

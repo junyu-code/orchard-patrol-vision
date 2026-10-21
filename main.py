@@ -2055,7 +2055,6 @@ QListWidget{
         preset_to_orchard = {
             "client_a": "恭城柑桔果园",
             "client_b": "兴安葡萄园",
-            "both": "恭城柑桔果园",
         }
         configured_orchard = self.cfg.get("ORCHARD_NAME") or preset_to_orchard.get(
             self.cfg.get("PRESET_NAME"), ORCHARD_NAMES[0]

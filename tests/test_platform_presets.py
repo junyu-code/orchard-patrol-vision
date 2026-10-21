@@ -5,7 +5,7 @@ from config.app_config import PRESET_NAMES, build_config
 
 class PlatformPresetTests(unittest.TestCase):
     def test_all_supported_presets_are_buildable(self):
-        self.assertEqual(PRESET_NAMES, ("client_a", "client_b", "both"))
+        self.assertEqual(PRESET_NAMES, ("client_a", "client_b"))
         for preset_name in PRESET_NAMES:
             config = build_config(preset_name)
             self.assertEqual(config["PRESET_NAME"], preset_name)
@@ -38,12 +38,18 @@ class PlatformPresetTests(unittest.TestCase):
             "rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor1",
         )
 
-    def test_both_enables_both_protocol_adapters(self):
-        config = build_config("both")
+    def test_nongkesuo_uses_orchard3_and_configured_streams(self):
+        config = build_config("农科所橘子园")
 
-        self.assertTrue(config["ENABLE_HTTP"])
-        self.assertTrue(config["ENABLE_UDP"])
-        self.assertTrue(config["ENABLE_RTMP"])
+        self.assertEqual(config["UDP_ORCHARD_ID"], "orchard3")
+        self.assertEqual(
+            config["RTMP_URL"],
+            "rtmp://gl.xsjny.com/live/py_orchard1_robot1_sensor1",
+        )
+        self.assertEqual(
+            config["RTMP_URL_RIGHT"],
+            "rtmp://gl.xsjny.com/live/py_orchard1_robot1_sensor2",
+        )
 
 
 if __name__ == "__main__":

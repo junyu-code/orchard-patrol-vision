@@ -22,14 +22,14 @@
 
 主程序一个进程对应一个视频源和一路 RTMP。`client_b` 当前默认左路 `sensor1`；
 推右路时将 `RTMP_URL` 改为 `RTMP_URL_RIGHT`，并把 `SENSOR_ID` 改为 `2`。
-左右相机同时在线需要分别启动采集进程，UDP 遥测只应由其中一个进程上报，避免重复数据。`both` 只表示同一个进程同时启用 HTTP 和 UDP，不会自动创建第二路视频采集。
+左右相机同时在线需要分别启动采集进程，UDP 遥测只应由其中一个进程上报，避免重复数据。
 
 ## 🔧 部署目标选择
 
 可以在 `config/app_config.py` 中修改 `ACTIVE_PRESET`，也可以在命令行或部署环境中覆盖：
 
 ```python
-# 选择使用哪个配置：'client_a' | 'client_b' | 'both'
+# 选择使用哪个配置：'client_a' | 'client_b'
 ACTIVE_PRESET = "client_b"  # 当前默认使用甲方B的配置
 ```
 
@@ -38,7 +38,6 @@ ACTIVE_PRESET = "client_b"  # 当前默认使用甲方B的配置
 ```bash
 python main.py --preset client_a
 python main.py --preset client_b
-python main.py --preset both
 ```
 
 Linux 的 `detect.sh` 读取 `APP_PRESET` 后传给同一个 `main.py`。固定一台机器的服务目标时只需配置一次，例如：
@@ -61,7 +60,6 @@ systemctl --user restart yolo-detect.service
 |--------|------|------|-----|------|
 | `"client_a"` | 仅对接甲方A | ✅ | ❌ | ✅ (甲方A地址) |
 | `"client_b"` | 仅对接甲方B | ❌ | ✅ | ✅ (甲方B地址) |
-| `"both"` | 同时对接两家 | ✅ | ✅ | ✅ (甲方B地址) |
 
 ## 📦 配置详情
 
@@ -91,9 +89,6 @@ PRESET_CONFIGS = {
         "RTMP_TIME_STANDARD": "utc+8",
         "UDP_TIME_STANDARD": "utc+8",
     },
-    "both": {
-        # 所有功能都启用
-    }
 }
 ```
 
@@ -125,12 +120,6 @@ python main.py --preset client_b
 🚀 检测线程启动
    配置方案: client_b
    HTTP: ❌ | RTMP: ✅ | UDP: ✅
-```
-
-### 3. 同时对接两家（测试用）
-
-```bash
-python main.py --preset both
 ```
 
 ## 📡 数据传输说明
@@ -261,9 +250,8 @@ scripts/
 ## 💡 建议
 
 1. **开发测试**: 使用 `"client_a"` 或 `"client_b"` 单独测试
-2. **联调验证**: 短期使用 `"both"` 同时验证两套系统
-3. **生产环境**: 根据实际需求选择对应的配置方案
-4. **性能考虑**: 同时对接可能增加系统负载，建议根据硬件配置选择
+2. **生产环境**: 根据实际需求选择对应的配置方案
+3. **性能考虑**: 同时运行多路采集进程会增加系统负载，建议根据硬件配置选择
 
 ## 📞 技术支持
 
