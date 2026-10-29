@@ -32,7 +32,8 @@
 orchard-patrol-vision/
 ├─ main.py                         # 主程序入口：界面、检测线程、上报和推流调度
 ├─ config/
-│  ├─ app_config.py                # 园区和协议运行配置
+│  ├─ defaults.py                  # 默认果园、推流参数和各园区服务地址
+│  ├─ app_config.py                # 将默认值组装为运行配置
 │  ├─ endpoints.json               # 当前和旧版平台地址备份
 │  └─ platform_accounts.example.json
 ├─ transport/
@@ -136,14 +137,17 @@ scripts\run-client-b-demo.bat
 
 A、B 两套历史业务共用同一个 `main.py` 运行时。界面启动后可在“园区”下拉框选择目标园区，程序会自动应用该园区的数据链路和视频地址；切换园区、相机或模型检测状态后，停止当前任务再重新启动即可使工作线程使用新配置。具体地址目录见 `docs/DUAL_CLIENT_GUIDE.md`。
 
-在 `config/defaults.py` 顶部修改默认运行目标和推流参数：
+默认目标、推流质量和各园区地址集中在 `config/defaults.py`。调整默认值时修改文件顶部的通用配置项；切换目标园区后，再修改对应园区的地址项：
 
 ```python
 DEFAULT_ORCHARD_NAME = "恭城柑桔果园"
 DEFAULT_RTMP_MAX_WIDTH = 1280
 DEFAULT_RTMP_RESOLUTION = "source"
+DEFAULT_RTMP_MAX_FPS = 0
 DEFAULT_RTMP_VIDEO_BITRATE = "3000k"
 ```
+
+`source` 表示跟随相机或视频源分辨率，`1280` 是最大宽度上限；`0` 表示不额外限制帧率。左右相机的 RTMP 地址分别配置，当前程序一个采集进程推送一路视频。
 
 也可以通过命令行临时指定：
 
@@ -163,7 +167,7 @@ python main.py --preset "农科所橘子园"
 | `client_b` / `兴安葡萄园` | UDP + RTMP |
 | `农科所橘子园` | UDP + RTMP |
 
-历史 `client_a`、`client_b` 参数继续兼容。启动后可在界面中配置：
+`client_a`、`client_b` 是兼容命令行和旧脚本的预设键；界面按果园名称选择运行目标。以前用于两套平台同时联调的 `both` 预设已移除。启动后可在界面中配置：
 
 - 左路和右路相机固定绑定（Windows 设备号 0/1，Linux `/dev/video0`/`/dev/video1`）
 - 横向或纵向显示原图、检测结果
@@ -172,15 +176,17 @@ python main.py --preset "农科所橘子园"
 
 ## 甲方 B 推流与 UDP
 
-甲方 B 当前测试服务器配置：
+兴安葡萄园和农科所橘子园使用 UDP + RTMP。当前服务配置分别为：
 
-- 管理平台：`https://gl.xsjny.com/web/robot-analysis-ui/#/analytics`
-- 大屏：`https://gl.xsjny.com/web/robot-data-view/index.html`
-- 左路 RTMP：`rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor1`（`client_b` 当前默认）
-- 右路 RTMP：`rtmp://gl.xsjny.com/live/vineyard1_robot1_sensor2`
-- UDP：`1.14.205.24:4926`
-- 视频默认跟随相机原生分辨率和帧率；需要限流时可在界面选择输出档位，远端画面叠加 ISO-8601 北京时间（`UTC+8`）
+- 兴安葡萄园果园编号：`vineyard1`；UDP：`1.14.205.24:4926`
+- 农科所橘子园果园编号：`orchard3`；UDP：`1.14.205.24:4926`
+- 农科所左路 RTMP：`rtmp://gl.xsjny.com/live/py_orchard1_robot1_sensor1`
+- 农科所右路 RTMP：`rtmp://gl.xsjny.com/live/py_orchard1_robot1_sensor2`
+- 兴安葡萄园左右路 RTMP 使用 `vineyard1_robot1_sensor1` 和 `vineyard1_robot1_sensor2` 流名
+- 视频默认跟随源分辨率和帧率，最大宽度为 `1280`；可在界面调整输出档位，远端画面叠加 ISO-8601 北京时间（`UTC+8`）
 - UDP 数据包：28 字节二进制协议，包头 `0x66`，包尾 `0x99`
+
+左右两路地址已经分别保存在园区配置中，但单个采集进程只推一路。需要同时推送左右路时，应分别启动两个采集进程，并避免两个进程重复上报同一份 UDP 遥测。
 
 UDP 上报内容包括：
 
