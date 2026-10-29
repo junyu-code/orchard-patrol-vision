@@ -79,6 +79,7 @@ ORCHARD_ENDPOINTS = {
         ),
     },
     "兴安葡萄园": {
+        "orchard_id": XINGAN_ORCHARD_ID,
         "HTTP": (),
         "UDP": (
             {"label": f"统一平台 UDP（{XINGAN_UDP_HOST}:{XINGAN_UDP_PORT}）", "host": XINGAN_UDP_HOST, "port": XINGAN_UDP_PORT},
@@ -92,11 +93,11 @@ ORCHARD_ENDPOINTS = {
         ),
     },
     "农科所橘子园": {
+        "orchard_id": NONGKESUO_ORCHARD_ID,
         "HTTP": (),
         "UDP": (
             {"label": f"统一平台 UDP（{NONGKESUO_UDP_HOST}:{NONGKESUO_UDP_PORT}）", "host": NONGKESUO_UDP_HOST, "port": NONGKESUO_UDP_PORT},
         ),
-        # 与葡萄园共用服务器，仅去掉 vineyard1_ 前缀。
         "RTMP": tuple(
             {"label": name, "url": url}
             for name, url in (
@@ -331,8 +332,9 @@ def build_config(preset_name=None):
             )
             if len(video_endpoint) > 1:
                 config["RTMP_URL_RIGHT"] = video_endpoint[1].get("url", "")
-        if requested_name == "农科所橘子园":
-            config["UDP_ORCHARD_ID"] = NONGKESUO_ORCHARD_ID
+        orchard_id = endpoint_config.get("orchard_id")
+        if orchard_id:
+            config["UDP_ORCHARD_ID"] = orchard_id
         if not config.get("RTMP_URL"):
             # 恭城果园的图片随 HTTP JSON 上传，没有独立 RTMP 视频流。
             config["ENABLE_RTMP"] = False
